@@ -2,16 +2,11 @@ import streamlit as st
 import pandas as pd
 import sqlite3
 from datetime import datetime
-import face_recognition
+from face_recognition import train_model, capture_images, get_user_by_face
 from utils import clear_inputs
-from database import (init_db, add_user, add_subject, mark_attendance, 
+from database import (init_db, add_user, add_subject, mark_attendance,
                      get_available_subjects, get_attendance_history,
-                     get_user_details)
-from init_timetable import init_timetable_data
-import matplotlib.pyplot as plt
-import logging
-import os
-import time
+                     get_user_by_id)
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -216,7 +211,6 @@ if not st.session_state.db_initialized:
         # Check if database exists and has tables
         if not os.path.exists('data/attendance.db'):
             init_db()
-            init_timetable_data()
         st.session_state.db_initialized = True
     except Exception as e:
         st.error(f"Database initialization error: {str(e)}")
@@ -247,34 +241,24 @@ if choice == "Register":
             submitted = st.form_submit_button("Register")
             
             if submitted and name and roll_number:
-                if add_user(name, roll_number):
-                    st.session_state.temp_name = name
-                    st.session_state.temp_roll = roll_number
-                    st.session_state.registration_step = 'capture'
-                    st.rerun()
-                else:
-                    st.error("❌ Roll number already exists!")
-    
-    elif st.session_state.registration_step == 'capture':
-        st.success("✅ Registration successful! Please proceed to capture your face.")
-        if st.button("📸 Capture Face"):
-            with st.spinner("Capturing..."):
-                if face_recognition.capture_images(st.session_state.temp_name, st.session_state.temp_roll):
-                    with st.spinner("Training model..."):
-                        if face_recognition.train_model("images", "model"):
-                            st.success("✨ Face captured successfully! You can now login.")
-                            # Reset registration state
-                            st.session_state.registration_step = 'form'
-                            st.session_state.temp_name = ''
-                            st.session_state.temp_roll = ''
-                            # Redirect to login
-                            st.session_state.current_page = "Login"
-                            time.sleep(1)
-                            st.rerun()
+                try:
+                    if capture_images(name, roll_number):
+                        if train_model():
+                            if add_user(roll_number, name):
+                                st.session_state.temp_name = name
+                                st.session_state.temp_roll = roll_number
+                                st.session_state.registration_step = 'capture'
+                                st.rerun()
+                            else:
+                                st.error("Failed to add user to database")
                         else:
-                            st.error("❌ Error training model. Please try again.")
-                else:
-                    st.error("❌ Error capturing face. Please try again.")
+                            st.error("Failed to train model")
+                    else:
+                        st.error("Failed to capture images")
+                except Exception as e:
+                    st.error(f"Registration failed: {str(e)}")
+            elif submitted:
+                st.warning("Please fill in all fields")
 
 elif choice == "Login":
     st.markdown("<h2>🔐 User Login</h2>", unsafe_allow_html=True)
@@ -295,16 +279,16 @@ elif choice == "Login":
 
         if scan_button:
             with st.spinner("Scanning..."):
-                user_id = face_recognition.get_user_by_face("model")
+                user_id = get_user_by_face()
                 if user_id:
                     st.session_state.temp_user_id = user_id
-                    user_details = get_user_details(user_id)
+                    user_details = get_user_by_id(user_id)
                     if user_details:
                         name, roll_number = user_details
                         st.success(f"✨ Welcome back, {name}!")
                         st.rerun()
                 else:
-                    st.error("❌ Face not recognized. Please register if you're a new user.")
+                    st.error("Face not recognized")
                     st.session_state.temp_user_id = None
 
         if st.session_state.temp_user_id:
@@ -328,7 +312,7 @@ elif choice == "Mark Attendance":
     st.markdown("<h2>📝 Mark Attendance</h2>", unsafe_allow_html=True)
     
     # Get user details for display
-    user_details = get_user_details(st.session_state.user_id)
+    user_details = get_user_by_id(st.session_state.user_id)
     if user_details:
         name, roll_number = user_details
         st.markdown(f"""
@@ -400,7 +384,7 @@ elif choice == "View Attendance":
     st.markdown("<h2>📈 Attendance History</h2>", unsafe_allow_html=True)
     
     # Get user details for display
-    user_details = get_user_details(st.session_state.user_id)
+    user_details = get_user_by_id(st.session_state.user_id)
     if user_details:
         name, roll_number = user_details
         st.markdown(f"""
