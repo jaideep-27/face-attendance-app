@@ -3,7 +3,11 @@ import numpy as np
 from PIL import Image
 import os
 
-detector = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
+# Initialize face detector
+cascade_path = os.path.join('model', 'haarcascade_frontalface_default.xml')
+detector = cv2.CascadeClassifier(cascade_path)
+if detector.empty():
+    raise RuntimeError("Error: Could not load face detection cascade classifier")
 
 def capture_images(name, student_id, save_dir="images"):
     try:
