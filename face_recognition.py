@@ -2,32 +2,48 @@ import cv2
 import numpy as np
 from PIL import Image
 import os
+import urllib.request
 
-# Initialize face detector
-cascade_path = os.path.join('model', 'haarcascade_frontalface_default.xml')
-if not os.path.exists(cascade_path):
-    raise RuntimeError(f"Cascade classifier not found at {cascade_path}")
+# Download and initialize face detector
+CASCADE_URL = 'https://raw.githubusercontent.com/opencv/opencv/master/data/haarcascades/haarcascade_frontalface_default.xml'
+CASCADE_PATH = os.path.join('model', 'haarcascade_frontalface_default.xml')
 
-detector = cv2.CascadeClassifier(cascade_path)
+# Download cascade classifier if not exists
+if not os.path.exists(CASCADE_PATH):
+    print(f"Downloading cascade classifier to {CASCADE_PATH}")
+    os.makedirs('model', exist_ok=True)
+    urllib.request.urlretrieve(CASCADE_URL, CASCADE_PATH)
+
+detector = cv2.CascadeClassifier(CASCADE_PATH)
 if detector.empty():
-    raise RuntimeError(f"Failed to load cascade classifier from {cascade_path}")
+    raise RuntimeError(f"Failed to load cascade classifier from {CASCADE_PATH}")
 
 def capture_images(name, student_id, save_dir="images"):
+    """Capture face images for registration"""
     try:
         os.makedirs(save_dir, exist_ok=True)
         
-        cam = cv2.VideoCapture(0)
-        if not cam.isOpened():
+        # Try different camera indices
+        cam = None
+        for idx in range(2):
+            cam = cv2.VideoCapture(idx)
+            if cam.isOpened():
+                break
+                
+        if cam is None or not cam.isOpened():
             print("Error: Could not open camera")
             return False
             
         count = 0
+        max_attempts = 50  # Maximum frames to try
+        attempts = 0
         
-        while True:
+        while attempts < max_attempts:
             ret, frame = cam.read()
             if not ret:
                 print("Error: Could not read frame")
-                break
+                attempts += 1
+                continue
                 
             gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
             faces = detector.detectMultiScale(gray, scaleFactor=1.3, minNeighbors=5)
@@ -36,26 +52,20 @@ def capture_images(name, student_id, save_dir="images"):
                 count += 1
                 face_path = os.path.join(save_dir, f"{name}_{student_id}_{count}.jpg")
                 cv2.imwrite(face_path, gray[y:y+h, x:x+w])
-                cv2.rectangle(frame, (x, y), (x+w, y+h), (255, 0, 0), 2)
                 
-            cv2.imshow("Face Capture - Press 'q' to finish", frame)
-            if cv2.waitKey(1) & 0xFF == ord('q') or count >= 20:
+            if count >= 5:  # Capture 5 face images
                 break
                 
-        cam.release()
-        cv2.destroyAllWindows()
-        
+            attempts += 1
+            
         return count > 0
         
     except Exception as e:
         print(f"Error capturing images: {str(e)}")
         return False
     finally:
-        try:
+        if cam is not None:
             cam.release()
-            cv2.destroyAllWindows()
-        except:
-            pass
 
 def train_model(image_dir, model_dir):
     try:

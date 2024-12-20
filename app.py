@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 import sqlite3
 from datetime import datetime
-from face_recognition import train_model, capture_images, get_user_by_face
+import face_recognition
 from utils import clear_inputs
 from database import (init_db, add_user, add_subject, mark_attendance, 
                      get_available_subjects, get_attendance_history,
@@ -259,9 +259,9 @@ if choice == "Register":
         st.success("✅ Registration successful! Please proceed to capture your face.")
         if st.button("📸 Capture Face"):
             with st.spinner("Capturing..."):
-                if capture_images(st.session_state.temp_name, st.session_state.temp_roll):
+                if face_recognition.capture_images(st.session_state.temp_name, st.session_state.temp_roll):
                     with st.spinner("Training model..."):
-                        if train_model("images", "model"):
+                        if face_recognition.train_model("images", "model"):
                             st.success("✨ Face captured successfully! You can now login.")
                             # Reset registration state
                             st.session_state.registration_step = 'form'
@@ -295,7 +295,7 @@ elif choice == "Login":
 
         if scan_button:
             with st.spinner("Scanning..."):
-                user_id = get_user_by_face("model")
+                user_id = face_recognition.get_user_by_face("model")
                 if user_id:
                     st.session_state.temp_user_id = user_id
                     user_details = get_user_details(user_id)
