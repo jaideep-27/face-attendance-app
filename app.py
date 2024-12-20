@@ -2,8 +2,8 @@ import streamlit as st
 import pandas as pd
 import sqlite3
 from datetime import datetime
-from face_recognition import train_model, capture_images
-from utils import clear_inputs, get_user_by_face
+from face_rec import train_model, capture_images, get_user_by_face
+from utils import clear_inputs
 from database import (init_db, add_user, add_subject, mark_attendance, 
                      get_available_subjects, get_attendance_history,
                      get_user_details)
