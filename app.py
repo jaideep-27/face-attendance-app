@@ -233,37 +233,24 @@ else:
 if choice == "Register":
     st.markdown("<h2>📝 New User Registration</h2>", unsafe_allow_html=True)
     
-    # Initialize registration state if not exists
-    if 'registration_step' not in st.session_state:
-        st.session_state.registration_step = 'form'
-        st.session_state.temp_name = ''
-        st.session_state.temp_roll = ''
+    # Get user inputs
+    name = st.text_input("Full Name")
+    roll_number = st.text_input("Roll Number")
     
-    if st.session_state.registration_step == 'form':
-        with st.form("registration_form"):
-            name = st.text_input("Full Name")
-            roll_number = st.text_input("Roll Number")
-            submitted = st.form_submit_button("Register")
-            
-            if submitted and name and roll_number:
-                try:
-                    if capture_images(name, roll_number):
-                        if train_model():
-                            if add_user(roll_number, name):
-                                st.session_state.temp_name = name
-                                st.session_state.temp_roll = roll_number
-                                st.session_state.registration_step = 'capture'
-                                st.rerun()
-                            else:
-                                st.error("Failed to add user to database")
-                        else:
-                            st.error("Failed to train model")
+    if st.button("Register"):
+        if name and roll_number:
+            try:
+                if capture_images(name, roll_number):
+                    if add_user(roll_number, name):
+                        st.success(f"✨ Registration successful! Welcome {name}!")
+                        st.session_state.user_id = roll_number
+                        st.rerun()
                     else:
-                        st.error("Failed to capture images")
-                except Exception as e:
-                    st.error(f"Registration failed: {str(e)}")
-            elif submitted:
-                st.warning("Please fill in all fields")
+                        st.error("Failed to add user to database")
+            except Exception as e:
+                st.error(f"Registration failed: {str(e)}")
+        else:
+            st.warning("Please fill in all fields")
 
 elif choice == "Login":
     st.markdown("<h2>🔐 User Login</h2>", unsafe_allow_html=True)
