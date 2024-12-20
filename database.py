@@ -1,164 +1,203 @@
 import sqlite3
 import os
-from datetime import datetime, time
-import time as time_module
+from datetime import datetime
+import logging
 
-def get_db():
-    """Get a database connection with proper timeout settings"""
-    # Create data directory if it doesn't exist
-    if not os.path.exists('data'):
-        os.makedirs('data')
-        
-    conn = sqlite3.connect('data/attendance.db', timeout=20)
-    conn.execute("PRAGMA busy_timeout = 10000")  # 10 second timeout
-    return conn
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# Database path
+DB_PATH = os.path.join(os.path.dirname(__file__), 'data', 'attendance.db')
 
 def init_db():
-    """Initialize the database with all required tables"""
-    conn = get_db()
-    c = conn.cursor()
-    
-    # Create tables if they don't exist
-    c.execute('''CREATE TABLE IF NOT EXISTS users
-                 (id INTEGER PRIMARY KEY,
-                  name TEXT NOT NULL,
-                  roll_number TEXT UNIQUE NOT NULL)''')
-    
-    c.execute('''CREATE TABLE IF NOT EXISTS subjects
-                 (id INTEGER PRIMARY KEY,
-                  name TEXT NOT NULL,
-                  code TEXT UNIQUE NOT NULL)''')
-    
-    c.execute('''CREATE TABLE IF NOT EXISTS timetable
-                 (id INTEGER PRIMARY KEY,
-                  subject_id INTEGER,
-                  day_of_week INTEGER,
-                  start_time TEXT,
-                  end_time TEXT,
-                  FOREIGN KEY (subject_id) REFERENCES subjects (id))''')
-    
-    c.execute('''CREATE TABLE IF NOT EXISTS attendance
-                 (id INTEGER PRIMARY KEY,
-                  user_id INTEGER,
-                  subject_id INTEGER,
-                  timestamp TEXT,
-                  FOREIGN KEY (user_id) REFERENCES users (id),
-                  FOREIGN KEY (subject_id) REFERENCES subjects (id))''')
-    
-    conn.commit()
-    conn.close()
-
-def add_user(name, roll_number):
-    conn = get_db()
-    c = conn.cursor()
+    """Initialize the database with required tables"""
     try:
-        c.execute('INSERT INTO users (name, roll_number) VALUES (?, ?)', (name, roll_number))
-        user_id = c.lastrowid
-        conn.commit()
-        return user_id
-    except sqlite3.IntegrityError:
-        return None
-    finally:
-        conn.close()
-
-def add_subject(name, code):
-    conn = get_db()
-    c = conn.cursor()
-    try:
-        c.execute('INSERT INTO subjects (name, code) VALUES (?, ?)', (name, code))
-        subject_id = c.lastrowid
-        conn.commit()
-        return subject_id
-    except sqlite3.IntegrityError:
-        return None
-    finally:
-        conn.close()
-
-def add_timetable_entry(subject_id, day_of_week, start_time, end_time):
-    conn = get_db()
-    c = conn.cursor()
-    try:
-        c.execute('''INSERT INTO timetable (subject_id, day_of_week, start_time, end_time)
-                     VALUES (?, ?, ?, ?)''', (subject_id, day_of_week, start_time, end_time))
-        conn.commit()
-    finally:
-        conn.close()
-
-def mark_attendance(user_id, subject_id):
-    """Mark attendance for a user in a subject"""
-    conn = get_db()
-    c = conn.cursor()
-    try:
-        # Check if attendance already marked today
-        today = datetime.now().strftime('%Y-%m-%d')
-        c.execute('''
-            SELECT COUNT(*) FROM attendance 
-            WHERE user_id = ? AND subject_id = ? 
-            AND date(timestamp) = ?
-        ''', (user_id, subject_id, today))
+        # Create data directory if it doesn't exist
+        os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
         
-        if c.fetchone()[0] > 0:
-            return False
-            
-        # Mark attendance with current timestamp
-        timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-        c.execute('''
-            INSERT INTO attendance (user_id, subject_id, timestamp)
-            VALUES (?, ?, ?)
-        ''', (user_id, subject_id, timestamp))
-        
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+
+        # Create users table
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS users (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+
+        # Create subjects table
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS subjects (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL UNIQUE,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+
+        # Create attendance table
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS attendance (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id TEXT,
+                subject_id INTEGER,
+                timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (user_id) REFERENCES users (id),
+                FOREIGN KEY (subject_id) REFERENCES subjects (id)
+            )
+        ''')
+
         conn.commit()
+        logger.info("Database initialized successfully")
         return True
-        
     except Exception as e:
-        print(f"Error marking attendance: {e}")
+        logger.error(f"Error initializing database: {str(e)}")
         return False
     finally:
-        conn.close()
+        if 'conn' in locals():
+            conn.close()
 
-def get_available_subjects(day_of_week):
-    """Get available subjects for the current time"""
-    conn = get_db()
-    c = conn.cursor()
+def add_user(user_id, name):
+    """Add a new user to the database"""
     try:
-        current_time = datetime.now().strftime('%H:%M')
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
         
-        c.execute('''
-            SELECT s.id, s.name, s.code, t.start_time, t.end_time
-            FROM subjects s
-            JOIN timetable t ON s.id = t.subject_id
-            WHERE t.day_of_week = ?
-            AND t.start_time <= ?
-            AND t.end_time >= ?
-            ORDER BY t.start_time
-        ''', (day_of_week, current_time, current_time))
-        
-        return c.fetchall()
+        cursor.execute('INSERT INTO users (id, name) VALUES (?, ?)', (user_id, name))
+        conn.commit()
+        logger.info(f"Added user: {name} with ID: {user_id}")
+        return True
+    except sqlite3.IntegrityError:
+        logger.error(f"User ID {user_id} already exists")
+        return False
+    except Exception as e:
+        logger.error(f"Error adding user: {str(e)}")
+        return False
     finally:
-        conn.close()
+        if 'conn' in locals():
+            conn.close()
 
-def get_attendance_history(user_id):
-    """Get attendance history for a user"""
-    conn = get_db()
-    c = conn.cursor()
+def add_subject(name):
+    """Add a new subject to the database"""
     try:
-        c.execute('''
-            SELECT s.id, s.name, s.code, a.timestamp
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        
+        cursor.execute('INSERT INTO subjects (name) VALUES (?)', (name,))
+        conn.commit()
+        logger.info(f"Added subject: {name}")
+        return True
+    except sqlite3.IntegrityError:
+        logger.error(f"Subject {name} already exists")
+        return False
+    except Exception as e:
+        logger.error(f"Error adding subject: {str(e)}")
+        return False
+    finally:
+        if 'conn' in locals():
+            conn.close()
+
+def mark_attendance(user_id, subject_name):
+    """Mark attendance for a user in a subject"""
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        
+        # Get subject ID
+        cursor.execute('SELECT id FROM subjects WHERE name = ?', (subject_name,))
+        result = cursor.fetchone()
+        if not result:
+            logger.error(f"Subject {subject_name} not found")
+            return False
+        subject_id = result[0]
+        
+        # Check if attendance already marked for today
+        today = datetime.now().date()
+        cursor.execute('''
+            SELECT COUNT(*) FROM attendance 
+            WHERE user_id = ? AND subject_id = ? 
+            AND date(timestamp) = date(?)
+        ''', (user_id, subject_id, today))
+        
+        if cursor.fetchone()[0] > 0:
+            logger.info(f"Attendance already marked for user {user_id} in {subject_name} today")
+            return True
+        
+        # Mark attendance
+        cursor.execute('''
+            INSERT INTO attendance (user_id, subject_id) 
+            VALUES (?, ?)
+        ''', (user_id, subject_id))
+        
+        conn.commit()
+        logger.info(f"Marked attendance for user {user_id} in {subject_name}")
+        return True
+    except Exception as e:
+        logger.error(f"Error marking attendance: {str(e)}")
+        return False
+    finally:
+        if 'conn' in locals():
+            conn.close()
+
+def get_available_subjects():
+    """Get list of all subjects"""
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        
+        cursor.execute('SELECT name FROM subjects ORDER BY name')
+        subjects = [row[0] for row in cursor.fetchall()]
+        return subjects
+    except Exception as e:
+        logger.error(f"Error getting subjects: {str(e)}")
+        return []
+    finally:
+        if 'conn' in locals():
+            conn.close()
+
+def get_attendance_history(date=None):
+    """Get attendance history, optionally filtered by date"""
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        
+        query = '''
+            SELECT u.id, u.name, s.name, a.timestamp
             FROM attendance a
+            JOIN users u ON a.user_id = u.id
             JOIN subjects s ON a.subject_id = s.id
-            WHERE a.user_id = ?
-            ORDER BY a.timestamp DESC
-        ''', (user_id,))
-        return c.fetchall()
+        '''
+        params = []
+        
+        if date:
+            query += ' WHERE date(a.timestamp) = date(?)'
+            params.append(date)
+            
+        query += ' ORDER BY a.timestamp DESC'
+        
+        cursor.execute(query, params)
+        return cursor.fetchall()
+    except Exception as e:
+        logger.error(f"Error getting attendance history: {str(e)}")
+        return []
     finally:
-        conn.close()
+        if 'conn' in locals():
+            conn.close()
 
-def get_user_details(user_id):
+def get_user_by_id(user_id):
     """Get user details by ID"""
-    conn = get_db()
-    c = conn.cursor()
     try:
-        c.execute('SELECT name, roll_number FROM users WHERE id = ?', (user_id,))
-        return c.fetchone()
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        
+        cursor.execute('SELECT name, id FROM users WHERE id = ?', (user_id,))
+        result = cursor.fetchone()
+        return result if result else None
+    except Exception as e:
+        logger.error(f"Error getting user: {str(e)}")
+        return None
     finally:
-        conn.close()
+        if 'conn' in locals():
+            conn.close()
