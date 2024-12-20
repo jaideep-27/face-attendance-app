@@ -126,3 +126,59 @@ def recognize_face(model_dir):
     cam.release()
     cv2.destroyAllWindows()
     return None
+
+def get_user_by_face(model_dir="model"):
+    """Recognize a face and return the student ID if found"""
+    try:
+        recognizer = cv2.face.LBPHFaceRecognizer_create()
+        model_path = os.path.join(model_dir, "trained_model.yml")
+        
+        if not os.path.exists(model_path):
+            print("No trained model found")
+            return None
+            
+        recognizer.read(model_path)
+        cam = cv2.VideoCapture(0)
+        
+        if not cam.isOpened():
+            print("Error: Could not open camera")
+            return None
+        
+        # Wait for camera to initialize
+        for _ in range(5):
+            ret, frame = cam.read()
+            if not ret:
+                print("Error: Could not read frame during initialization")
+                return None
+                
+        # Capture and process frame
+        ret, frame = cam.read()
+        if not ret:
+            print("Error: Could not read frame")
+            return None
+            
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        faces = detector.detectMultiScale(gray, scaleFactor=1.3, minNeighbors=5)
+        
+        student_id = None
+        min_confidence = float('inf')
+        
+        for (x, y, w, h) in faces:
+            face = gray[y:y+h, x:x+w]
+            id_, confidence = recognizer.predict(face)
+            
+            if confidence < 70 and confidence < min_confidence:
+                student_id = id_
+                min_confidence = confidence
+        
+        return student_id
+        
+    except Exception as e:
+        print(f"Error in face recognition: {str(e)}")
+        return None
+    finally:
+        try:
+            cam.release()
+            cv2.destroyAllWindows()
+        except:
+            pass
