@@ -201,3 +201,46 @@ def get_user_by_id(user_id):
     finally:
         if 'conn' in locals():
             conn.close()
+
+def list_users():
+    """List all users in the database"""
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        
+        cursor.execute('SELECT id, name FROM users')
+        users = cursor.fetchall()
+        return users
+    except Exception as e:
+        logger.error(f"Error listing users: {str(e)}")
+        return []
+    finally:
+        if 'conn' in locals():
+            conn.close()
+
+def reset_db():
+    """Reset the database by removing and reinitializing it"""
+    try:
+        # Remove existing database
+        if os.path.exists(DB_PATH):
+            os.remove(DB_PATH)
+            logger.info("Removed existing database")
+        
+        # Remove features file
+        features_file = os.path.join('model', 'features.json')
+        if os.path.exists(features_file):
+            os.remove(features_file)
+            logger.info("Removed features file")
+            
+        # Remove images directory
+        images_dir = os.path.join(os.path.dirname(__file__), 'images')
+        if os.path.exists(images_dir):
+            import shutil
+            shutil.rmtree(images_dir)
+            logger.info("Removed images directory")
+        
+        # Initialize fresh database
+        return init_db()
+    except Exception as e:
+        logger.error(f"Error resetting database: {str(e)}")
+        return False

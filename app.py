@@ -4,11 +4,13 @@ import sqlite3
 import os
 import logging
 from datetime import datetime
+import time
 from face_rec import capture_images, get_user_by_face
 from utils import clear_inputs
 from database import (init_db, add_user, add_subject, mark_attendance,
                      get_available_subjects, get_attendance_history,
-                     get_user_by_id)
+                     get_user_by_id, list_users, reset_db)
+import json
 
 # Configure logging
 logging.basicConfig(
@@ -213,8 +215,10 @@ if 'current_page' not in st.session_state:
 # Initialize database only once when app starts
 if not st.session_state.db_initialized:
     try:
-        # Check if database exists and has tables
-        if not os.path.exists('data/attendance.db'):
+        # Reset database if it's corrupted or if DEBUG is set
+        if os.environ.get('DEBUG') or not os.path.exists('data/attendance.db'):
+            reset_db()
+        else:
             init_db()
         st.session_state.db_initialized = True
     except Exception as e:
@@ -233,6 +237,13 @@ else:
 if choice == "Register":
     st.markdown("<h2>📝 New User Registration</h2>", unsafe_allow_html=True)
     
+    # For debugging
+    if os.environ.get('DEBUG'):
+        st.write("Current users in database:")
+        users = list_users()
+        for user_id, name in users:
+            st.write(f"- {name} (ID: {user_id})")
+    
     # Get user inputs
     name = st.text_input("Full Name")
     roll_number = st.text_input("Roll Number")
@@ -240,6 +251,24 @@ if choice == "Register":
     if st.button("Register"):
         if name and roll_number:
             try:
+                # Clean up any existing files for this user
+                user_image_dir = os.path.join('images', str(roll_number))
+                if os.path.exists(user_image_dir):
+                    import shutil
+                    shutil.rmtree(user_image_dir)
+                
+                features_file = os.path.join('model', 'features.json')
+                if os.path.exists(features_file):
+                    try:
+                        with open(features_file, 'r') as f:
+                            features = json.load(f)
+                        if str(roll_number) in features:
+                            del features[str(roll_number)]
+                        with open(features_file, 'w') as f:
+                            json.dump(features, f)
+                    except:
+                        pass
+                
                 logger.info(f"Starting registration for {name} ({roll_number})")
                 
                 # First try to add user to database
@@ -256,8 +285,12 @@ if choice == "Register":
                         st.rerun()
                     else:
                         logger.error("Face registration failed")
-                        # If face registration fails, remove user from database
-                        # TODO: Add function to remove user
+                        # Remove user from database if face registration fails
+                        conn = sqlite3.connect('data/attendance.db')
+                        cursor = conn.cursor()
+                        cursor.execute('DELETE FROM users WHERE id = ?', (roll_number,))
+                        conn.commit()
+                        conn.close()
                         st.error("Face registration failed. Please try again with a clear photo.")
                 else:
                     logger.error("Failed to add user to database")
