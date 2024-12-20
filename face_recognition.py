@@ -19,8 +19,16 @@ face_cascade = cv2.CascadeClassifier(cascade_path)
 if face_cascade.empty():
     raise ValueError("Error loading cascade classifier")
 
-# Initialize face recognizer
-recognizer = cv2.face.LBPHFaceRecognizer_create()
+try:
+    # Initialize face recognizer
+    recognizer = cv2.face.LBPHFaceRecognizer_create()
+except AttributeError:
+    try:
+        # Try alternative import
+        recognizer = cv2.createLBPHFaceRecognizer()
+    except AttributeError:
+        logger.error("Failed to create face recognizer. OpenCV face recognition module not available.")
+        raise ImportError("OpenCV face recognition module not available. Please install opencv-contrib-python package.")
 
 def get_images_and_labels(path):
     image_paths = [os.path.join(path, f) for f in os.listdir(path)]
