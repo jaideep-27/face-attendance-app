@@ -143,6 +143,7 @@ def extract_features(image_dir):
             
         mean_features = np.mean(features, axis=0).tolist()
         logger.info("Calculated mean features")
+        logger.info(f"Extracted features: {len(features)} images processed.")
         return mean_features
         
     except Exception as e:
