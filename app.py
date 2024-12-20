@@ -1,6 +1,8 @@
 import streamlit as st
 import pandas as pd
 import sqlite3
+import os
+import logging
 from datetime import datetime
 from face_recognition import train_model, capture_images, get_user_by_face
 from utils import clear_inputs
@@ -9,7 +11,10 @@ from database import (init_db, add_user, add_subject, mark_attendance,
                      get_user_by_id)
 
 # Configure logging
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
 logger = logging.getLogger(__name__)
 
 # Create necessary directories
