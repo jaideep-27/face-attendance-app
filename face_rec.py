@@ -4,6 +4,7 @@ from PIL import Image
 import os
 import json
 import logging
+import streamlit as st
 from download_cascade import download_cascade
 
 # Configure logging
@@ -22,61 +23,49 @@ def capture_images(name, user_id, save_dir="images"):
         user_dir = os.path.join(save_dir, str(user_id))
         os.makedirs(user_dir, exist_ok=True)
         
-        # Initialize camera
-        cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)  # Try DirectShow backend on Windows
-        if not cap.isOpened():
-            cap = cv2.VideoCapture(0)  # Fallback to default
+        # For cloud deployment, use Streamlit's camera input
+        img_file = st.camera_input("Take a picture")
         
-        if not cap.isOpened():
-            logger.error("Could not open camera")
-            return False
+        if img_file is not None:
+            # Save the captured image
+            img = Image.open(img_file)
+            img = np.array(img)
             
-        images_captured = 0
-        required_images = 5
-        
-        while images_captured < required_images:
-            ret, frame = cap.read()
-            if not ret:
-                logger.error("Failed to grab frame")
-                break
+            # Convert to grayscale if image is RGB
+            if len(img.shape) == 3:
+                gray = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
+            else:
+                gray = img
                 
-            # Convert to grayscale
-            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-            
             # Detect faces
             faces = detector.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=5, minSize=(30, 30))
             
-            for (x, y, w, h) in faces:
-                # Draw rectangle around face
-                cv2.rectangle(frame, (x, y), (x+w, y+h), (0, 255, 0), 2)
+            if len(faces) == 0:
+                st.error("No face detected in the image. Please try again.")
+                return False
                 
-                # Extract and save face
-                face = gray[y:y+h, x:x+w]
-                face_path = os.path.join(user_dir, f"{images_captured}.jpg")
-                cv2.imwrite(face_path, face)
+            if len(faces) > 1:
+                st.error("Multiple faces detected. Please ensure only one person is in the frame.")
+                return False
                 
-                images_captured += 1
-                logger.info(f"Captured image {images_captured}/{required_images}")
-                break
+            # Extract and save face
+            x, y, w, h = faces[0]
+            face = gray[y:y+h, x:x+w]
+            face_path = os.path.join(user_dir, "0.jpg")
+            cv2.imwrite(face_path, face)
             
-            # Display frame
-            cv2.imshow('Capture', frame)
-            if cv2.waitKey(1) & 0xFF == ord('q'):
-                break
-                
-        cap.release()
-        cv2.destroyAllWindows()
-        
-        if images_captured == required_images:
             # Extract and save features
             features = extract_features(user_dir)
             save_features(user_id, features)
+            
+            st.success("Registration successful!")
             return True
             
         return False
         
     except Exception as e:
         logger.error(f"Error capturing images: {str(e)}")
+        st.error("An error occurred during image capture. Please try again.")
         return False
 
 def extract_features(image_dir):
@@ -112,6 +101,7 @@ def save_features(user_id, features):
             
     except Exception as e:
         logger.error(f"Error saving features: {str(e)}")
+        st.error("An error occurred while saving user data. Please try again.")
 
 def get_user_by_face():
     """Recognize user from webcam"""
@@ -119,6 +109,7 @@ def get_user_by_face():
         features_file = os.path.join('model', 'features.json')
         if not os.path.exists(features_file):
             logger.error("No registered users found")
+            st.error("No registered users found. Please register first.")
             return None
             
         with open(features_file, 'r') as f:
@@ -126,57 +117,62 @@ def get_user_by_face():
             
         if not all_features:
             logger.error("No registered users found")
+            st.error("No registered users found. Please register first.")
             return None
             
-        # Initialize camera
-        cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)  # Try DirectShow backend on Windows
-        if not cap.isOpened():
-            cap = cv2.VideoCapture(0)  # Fallback to default
+        # For cloud deployment, use Streamlit's camera input
+        img_file = st.camera_input("Take a picture for recognition")
+        
+        if img_file is not None:
+            # Process the captured image
+            img = Image.open(img_file)
+            img = np.array(img)
             
-        if not cap.isOpened():
-            logger.error("Could not open camera")
-            return None
-            
-        while True:
-            ret, frame = cap.read()
-            if not ret:
-                break
+            # Convert to grayscale if image is RGB
+            if len(img.shape) == 3:
+                gray = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
+            else:
+                gray = img
                 
-            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+            # Detect faces
             faces = detector.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=5, minSize=(30, 30))
             
-            for (x, y, w, h) in faces:
-                face = gray[y:y+h, x:x+w]
+            if len(faces) == 0:
+                st.error("No face detected in the image. Please try again.")
+                return None
                 
-                # Calculate histogram
-                hist = cv2.calcHist([face], [0], None, [256], [0, 256])
-                hist = cv2.normalize(hist, hist).flatten()
+            if len(faces) > 1:
+                st.error("Multiple faces detected. Please ensure only one person is in the frame.")
+                return None
                 
-                # Compare with stored features
-                min_dist = float('inf')
-                matched_id = None
-                
-                for user_id, features in all_features.items():
-                    dist = np.linalg.norm(hist - np.array(features))
-                    if dist < min_dist and dist < 0.3:  # Threshold for matching
-                        min_dist = dist
-                        matched_id = user_id
-                
-                if matched_id:
-                    cap.release()
-                    cv2.destroyAllWindows()
-                    return matched_id
-                    
-                cv2.rectangle(frame, (x, y), (x+w, y+h), (0, 255, 0), 2)
+            # Extract face and calculate features
+            x, y, w, h = faces[0]
+            face = gray[y:y+h, x:x+w]
             
-            cv2.imshow('Recognition', frame)
-            if cv2.waitKey(1) & 0xFF == ord('q'):
-                break
+            # Calculate histogram
+            hist = cv2.calcHist([face], [0], None, [256], [0, 256])
+            hist = cv2.normalize(hist, hist).flatten()
+            
+            # Compare with stored features
+            min_dist = float('inf')
+            matched_id = None
+            
+            for user_id, features in all_features.items():
+                dist = np.linalg.norm(hist - np.array(features))
+                if dist < min_dist and dist < 0.3:  # Threshold for matching
+                    min_dist = dist
+                    matched_id = user_id
+            
+            if matched_id:
+                st.success("Face recognized successfully!")
+                return matched_id
+            else:
+                st.error("Face not recognized. Please try again or register if you're a new user.")
+                return None
                 
-        cap.release()
-        cv2.destroyAllWindows()
         return None
         
     except Exception as e:
         logger.error(f"Error in face recognition: {str(e)}")
+        st.error("An error occurred during face recognition. Please try again.")
         return None
