@@ -276,11 +276,15 @@ if choice == "Register":
                     logger.info("User added to database successfully")
                     
                     # Then try to capture and process face
-                    if capture_images(name, roll_number):
+                    result = capture_images(name, roll_number)
+                    
+                    if result is None:
+                        # Still waiting for image capture
+                        pass
+                    elif result:
                         logger.info("Face registration successful")
                         st.success(f"✨ Registration successful! Welcome {name}! You can now proceed to login.")
                         st.session_state.current_page = "Login"
-                        import time
                         time.sleep(2)  # Give user time to read the message
                         st.rerun()
                     else:
@@ -291,7 +295,6 @@ if choice == "Register":
                         cursor.execute('DELETE FROM users WHERE id = ?', (roll_number,))
                         conn.commit()
                         conn.close()
-                        st.error("Face registration failed. Please try again with a clear photo.")
                 else:
                     logger.error("Failed to add user to database")
                     st.error("This roll number is already registered. Please use a different one.")

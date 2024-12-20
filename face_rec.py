@@ -19,6 +19,35 @@ download_cascade()
 cascade_path = os.path.join('model', 'haarcascade_frontalface_default.xml')
 detector = cv2.CascadeClassifier(cascade_path)
 
+def train_model(user_id, user_dir):
+    """Train the face recognition model for a new user"""
+    try:
+        logger.info(f"Training model for user {user_id}")
+        
+        # Load and preprocess face image
+        face_path = os.path.join(user_dir, "0.jpg")
+        if not os.path.exists(face_path):
+            logger.error(f"Face image not found at {face_path}")
+            return False
+            
+        # Extract features
+        features = extract_features(user_dir)
+        if features is None:
+            logger.error("Failed to extract features")
+            return False
+            
+        # Save features
+        if not save_features(user_id, features):
+            logger.error("Failed to save features")
+            return False
+            
+        logger.info("Model training completed successfully")
+        return True
+        
+    except Exception as e:
+        logger.error(f"Error training model: {str(e)}", exc_info=True)
+        return False
+
 def capture_images(name, user_id, save_dir="images"):
     """Capture multiple images of a face for registration"""
     try:
@@ -32,56 +61,56 @@ def capture_images(name, user_id, save_dir="images"):
         # For cloud deployment, use Streamlit's camera input
         img_file = st.camera_input("Take a picture")
         
-        if img_file is not None:
-            logger.info("Image captured from camera")
+        if img_file is None:
+            logger.info("No image captured yet")
+            return None  # Return None to indicate waiting for image
             
-            # Save the captured image
-            img = Image.open(img_file)
-            img = np.array(img)
-            logger.info(f"Image shape: {img.shape}")
-            
-            # Convert to grayscale if image is RGB
-            if len(img.shape) == 3:
-                gray = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
-                logger.info("Converted RGB image to grayscale")
-            else:
-                gray = img
-                logger.info("Image is already grayscale")
-                
-            # Detect faces
-            faces = detector.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=5, minSize=(30, 30))
-            logger.info(f"Detected {len(faces)} faces")
-            
-            if len(faces) == 0:
-                logger.error("No face detected in the image")
-                st.error("No face detected in the image. Please try again.")
-                return False
-                
-            if len(faces) > 1:
-                logger.error("Multiple faces detected")
-                st.error("Multiple faces detected. Please ensure only one person is in the frame.")
-                return False
-                
-            # Extract and save face
-            x, y, w, h = faces[0]
-            face = gray[y:y+h, x:x+w]
-            face_path = os.path.join(user_dir, "0.jpg")
-            cv2.imwrite(face_path, face)
-            logger.info(f"Saved face image to: {face_path}")
-            
-            # Extract and save features
-            features = extract_features(user_dir)
-            logger.info("Extracted face features")
-            
-            save_features(user_id, features)
-            logger.info("Saved features to JSON file")
-            
-            st.success("✨ Registration successful! You can now proceed to login.")
-            return True
-            
-        logger.info("No image captured from camera")
-        return False
+        logger.info("Image captured from camera")
         
+        # Save the captured image
+        img = Image.open(img_file)
+        img = np.array(img)
+        logger.info(f"Image shape: {img.shape}")
+        
+        # Convert to grayscale if image is RGB
+        if len(img.shape) == 3:
+            gray = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
+            logger.info("Converted RGB image to grayscale")
+        else:
+            gray = img
+            logger.info("Image is already grayscale")
+            
+        # Detect faces
+        faces = detector.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=5, minSize=(30, 30))
+        logger.info(f"Detected {len(faces)} faces")
+        
+        if len(faces) == 0:
+            logger.error("No face detected in the image")
+            st.error("No face detected in the image. Please try again.")
+            return False
+            
+        if len(faces) > 1:
+            logger.error("Multiple faces detected")
+            st.error("Multiple faces detected. Please ensure only one person is in the frame.")
+            return False
+            
+        # Extract and save face
+        x, y, w, h = faces[0]
+        face = gray[y:y+h, x:x+w]
+        face_path = os.path.join(user_dir, "0.jpg")
+        cv2.imwrite(face_path, face)
+        logger.info(f"Saved face image to: {face_path}")
+        
+        # Train model with the captured image
+        if train_model(user_id, user_dir):
+            logger.info("Face registration and training successful")
+            st.success("✨ Face registered successfully!")
+            return True
+        else:
+            logger.error("Model training failed")
+            st.error("Failed to process face image. Please try again.")
+            return False
+            
     except Exception as e:
         logger.error(f"Error capturing images: {str(e)}", exc_info=True)
         st.error(f"An error occurred during image capture: {str(e)}")
@@ -96,6 +125,10 @@ def extract_features(image_dir):
             if img_name.endswith('.jpg'):
                 img_path = os.path.join(image_dir, img_name)
                 img = cv2.imread(img_path, cv2.IMREAD_GRAYSCALE)
+                if img is None:
+                    logger.error(f"Failed to load image: {img_path}")
+                    return None
+                    
                 logger.info(f"Processing image: {img_path}")
                 
                 # Calculate histogram as feature
@@ -104,13 +137,17 @@ def extract_features(image_dir):
                 features.append(hist.tolist())
                 logger.info("Calculated histogram features")
         
+        if not features:
+            logger.error("No features extracted")
+            return None
+            
         mean_features = np.mean(features, axis=0).tolist()
         logger.info("Calculated mean features")
         return mean_features
         
     except Exception as e:
         logger.error(f"Error extracting features: {str(e)}", exc_info=True)
-        raise
+        return None
 
 def save_features(user_id, features):
     """Save user features to JSON file"""
@@ -135,10 +172,12 @@ def save_features(user_id, features):
             json.dump(all_features, f)
             logger.info("Successfully saved features to file")
             
+        return True
+            
     except Exception as e:
         logger.error(f"Error saving features: {str(e)}", exc_info=True)
         st.error("An error occurred while saving user data. Please try again.")
-        raise
+        return False
 
 def get_user_by_face():
     """Recognize user from webcam"""
