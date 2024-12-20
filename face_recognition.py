@@ -3,17 +3,22 @@ import numpy as np
 import os
 import urllib.request
 
-# Download and initialize face detector
-CASCADE_URL = 'https://raw.githubusercontent.com/opencv/opencv/master/data/haarcascades/haarcascade_frontalface_default.xml'
-CASCADE_PATH = os.path.join(os.path.dirname(__file__), 'model', 'haarcascade_frontalface_default.xml')
+# Define paths
+MODEL_DIR = os.path.join(os.path.dirname(__file__), 'model')
+CASCADE_FILE = 'haarcascade_frontalface_default.xml'
+CASCADE_PATH = os.path.join(MODEL_DIR, CASCADE_FILE)
+CASCADE_URL = f'https://raw.githubusercontent.com/opencv/opencv/master/data/haarcascades/{CASCADE_FILE}'
 
 # Create model directory if it doesn't exist
-os.makedirs(os.path.dirname(CASCADE_PATH), exist_ok=True)
+os.makedirs(MODEL_DIR, exist_ok=True)
 
 # Download cascade classifier if not exists
 if not os.path.exists(CASCADE_PATH):
     print(f"Downloading cascade classifier to {CASCADE_PATH}")
-    urllib.request.urlretrieve(CASCADE_URL, CASCADE_PATH)
+    try:
+        urllib.request.urlretrieve(CASCADE_URL, CASCADE_PATH)
+    except Exception as e:
+        raise RuntimeError(f"Failed to download cascade classifier: {str(e)}")
 
 # Initialize face detector
 detector = cv2.CascadeClassifier()
@@ -22,7 +27,7 @@ if not detector.load(CASCADE_PATH):
 
 # Initialize LBPH Face Recognizer
 recognizer = cv2.face.LBPHFaceRecognizer_create()
-RECOGNIZER_PATH = os.path.join(os.path.dirname(__file__), 'model', 'lbph_recognizer.yml')
+RECOGNIZER_PATH = os.path.join(MODEL_DIR, 'lbph_recognizer.yml')
 
 def capture_images(name, student_id, save_dir="images"):
     """Capture face images for registration"""

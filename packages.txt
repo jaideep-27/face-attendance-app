@@ -13,3 +13,5 @@ libxcb-image0
 libxcb-keysyms1
 libxcb-randr0
 libxcb-xfixes0
+libxcb-shape0
+libxcb-xinerama0
