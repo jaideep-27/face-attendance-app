@@ -5,9 +5,12 @@ import os
 
 # Initialize face detector
 cascade_path = os.path.join('model', 'haarcascade_frontalface_default.xml')
+if not os.path.exists(cascade_path):
+    raise RuntimeError(f"Cascade classifier not found at {cascade_path}")
+
 detector = cv2.CascadeClassifier(cascade_path)
 if detector.empty():
-    raise RuntimeError("Error: Could not load face detection cascade classifier")
+    raise RuntimeError(f"Failed to load cascade classifier from {cascade_path}")
 
 def capture_images(name, student_id, save_dir="images"):
     try:
