@@ -3,6 +3,8 @@ import os
 import numpy as np
 from PIL import Image
 import logging
+import json
+from datetime import datetime
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -19,64 +21,55 @@ face_cascade = cv2.CascadeClassifier(cascade_path)
 if face_cascade.empty():
     raise ValueError("Error loading cascade classifier")
 
-try:
-    # Initialize face recognizer
-    recognizer = cv2.face.LBPHFaceRecognizer_create()
-except AttributeError:
-    try:
-        # Try alternative import
-        recognizer = cv2.createLBPHFaceRecognizer()
-    except AttributeError:
-        logger.error("Failed to create face recognizer. OpenCV face recognition module not available.")
-        raise ImportError("OpenCV face recognition module not available. Please install opencv-contrib-python package.")
+class SimpleFaceRecognizer:
+    def __init__(self):
+        self.faces_dir = 'faces'
+        self.model_file = 'model/face_data.json'
+        os.makedirs(self.faces_dir, exist_ok=True)
+        os.makedirs('model', exist_ok=True)
+        self.face_data = self._load_face_data()
 
-def get_images_and_labels(path):
-    image_paths = [os.path.join(path, f) for f in os.listdir(path)]
-    face_samples = []
-    ids = []
+    def _load_face_data(self):
+        if os.path.exists(self.model_file):
+            with open(self.model_file, 'r') as f:
+                return json.load(f)
+        return {}
 
-    for image_path in image_paths:
-        try:
-            # Convert image to grayscale
-            PIL_img = Image.open(image_path).convert('L')
-            img_numpy = np.array(PIL_img, 'uint8')
+    def _save_face_data(self):
+        with open(self.model_file, 'w') as f:
+            json.dump(self.face_data, f)
 
-            # Get the user ID from the image path
-            user_id = int(os.path.split(image_path)[-1].split("_")[1].split(".")[0])
-            
-            # Detect faces in the image
-            faces = face_cascade.detectMultiScale(img_numpy)
+    def _get_face_features(self, face_img):
+        # Resize to standard size for comparison
+        face_img = cv2.resize(face_img, (100, 100))
+        # Calculate histogram as a simple feature
+        hist = cv2.calcHist([face_img], [0], None, [256], [0, 256])
+        hist = cv2.normalize(hist, hist).flatten()
+        return hist.tolist()
 
-            for (x, y, w, h) in faces:
-                face_samples.append(img_numpy[y:y+h, x:x+w])
-                ids.append(user_id)
+    def _compare_features(self, features1, features2):
+        return cv2.compareHist(
+            np.array(features1, dtype=np.float32),
+            np.array(features2, dtype=np.float32),
+            cv2.HISTCMP_CORREL
+        )
 
-        except Exception as e:
-            logger.error(f"Error processing image {image_path}: {str(e)}")
-            continue
-
-    return face_samples, ids
+# Initialize the recognizer
+recognizer = SimpleFaceRecognizer()
 
 def train_model():
+    """Train the face recognition model"""
     try:
         logger.info("Training face recognition model...")
-        faces, ids = get_images_and_labels('images')
-        recognizer.train(faces, np.array(ids))
-        recognizer.save('model/trained_model.yml')
-        logger.info("Model training completed successfully")
+        # The model is automatically updated when new faces are added
         return True
     except Exception as e:
         logger.error(f"Error training model: {str(e)}")
         return False
 
 def capture_images(name, user_id):
+    """Capture face images for registration"""
     try:
-        # Create directories if they don't exist
-        if not os.path.exists('images'):
-            os.makedirs('images')
-        if not os.path.exists('model'):
-            os.makedirs('model')
-
         # Initialize camera
         cap = cv2.VideoCapture(0)
         if not cap.isOpened():
@@ -84,7 +77,9 @@ def capture_images(name, user_id):
             return False
 
         count = 0
-        while count < 30:  # Capture 30 images
+        face_features = []
+        
+        while count < 5:  # Capture 5 images
             ret, frame = cap.read()
             if not ret:
                 logger.error("Error: Could not read frame")
@@ -94,26 +89,37 @@ def capture_images(name, user_id):
             faces = face_cascade.detectMultiScale(gray, 1.3, 5)
 
             for (x, y, w, h) in faces:
+                face_img = gray[y:y+h, x:x+w]
+                features = recognizer._get_face_features(face_img)
+                face_features.append(features)
+                
+                # Save the face image
+                img_path = os.path.join(recognizer.faces_dir, f"{user_id}_{count}.jpg")
+                cv2.imwrite(img_path, face_img)
+                
                 count += 1
-                # Save the captured face
-                cv2.imwrite(f"images/User_{user_id}_{count}.jpg", gray[y:y+h, x:x+w])
+                break  # Only use the first face detected
 
         cap.release()
-        return count > 0
+
+        if count > 0:
+            # Save face features
+            recognizer.face_data[str(user_id)] = {
+                'name': name,
+                'features': face_features,
+                'timestamp': datetime.now().isoformat()
+            }
+            recognizer._save_face_data()
+            return True
+            
+        return False
     except Exception as e:
         logger.error(f"Error capturing images: {str(e)}")
         return False
 
 def get_user_by_face():
+    """Recognize a face and return the user ID"""
     try:
-        # Load the trained model
-        if not os.path.exists('model/trained_model.yml'):
-            logger.error("Error: Model file not found")
-            return None
-
-        recognizer.read('model/trained_model.yml')
-
-        # Initialize camera
         cap = cv2.VideoCapture(0)
         if not cap.isOpened():
             logger.error("Error: Could not open camera")
@@ -128,14 +134,25 @@ def get_user_by_face():
         faces = face_cascade.detectMultiScale(gray, 1.3, 5)
 
         for (x, y, w, h) in faces:
-            face = gray[y:y+h, x:x+w]
-            user_id, confidence = recognizer.predict(face)
+            face_img = gray[y:y+h, x:x+w]
+            features = recognizer._get_face_features(face_img)
             
-            # Lower confidence means better match
-            if confidence < 100:
-                cap.release()
-                return str(user_id)
+            best_match = None
+            best_score = -1
+            
+            for user_id, data in recognizer.face_data.items():
+                for stored_features in data['features']:
+                    score = recognizer._compare_features(features, stored_features)
+                    if score > best_score:
+                        best_score = score
+                        best_match = user_id
 
+            cap.release()
+            
+            # Threshold for face recognition confidence
+            if best_score > 0.5:
+                return best_match
+                
         cap.release()
         return None
     except Exception as e:
