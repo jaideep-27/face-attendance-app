@@ -1,160 +1,182 @@
 import cv2
-import os
 import numpy as np
 from PIL import Image
-import logging
+import os
 import json
-from datetime import datetime
+import logging
+from download_cascade import download_cascade
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Initialize the face cascade classifier
-cascade_path = os.path.join(os.path.dirname(__file__), 'haarcascade_frontalface_default.xml')
-if not os.path.exists(cascade_path):
-    import urllib.request
-    url = 'https://raw.githubusercontent.com/opencv/opencv/master/data/haarcascades/haarcascade_frontalface_default.xml'
-    urllib.request.urlretrieve(url, cascade_path)
+# Download and initialize face detector
+download_cascade()
+cascade_path = os.path.join('model', 'haarcascade_frontalface_default.xml')
+detector = cv2.CascadeClassifier(cascade_path)
 
-face_cascade = cv2.CascadeClassifier(cascade_path)
-if face_cascade.empty():
-    raise ValueError("Error loading cascade classifier")
-
-class SimpleFaceRecognizer:
-    def __init__(self):
-        self.faces_dir = 'faces'
-        self.model_file = 'model/face_data.json'
-        os.makedirs(self.faces_dir, exist_ok=True)
-        os.makedirs('model', exist_ok=True)
-        self.face_data = self._load_face_data()
-
-    def _load_face_data(self):
-        if os.path.exists(self.model_file):
-            with open(self.model_file, 'r') as f:
-                return json.load(f)
-        return {}
-
-    def _save_face_data(self):
-        with open(self.model_file, 'w') as f:
-            json.dump(self.face_data, f)
-
-    def _get_face_features(self, face_img):
-        # Resize to standard size for comparison
-        face_img = cv2.resize(face_img, (100, 100))
-        # Calculate histogram as a simple feature
-        hist = cv2.calcHist([face_img], [0], None, [256], [0, 256])
-        hist = cv2.normalize(hist, hist).flatten()
-        return hist.tolist()
-
-    def _compare_features(self, features1, features2):
-        return cv2.compareHist(
-            np.array(features1, dtype=np.float32),
-            np.array(features2, dtype=np.float32),
-            cv2.HISTCMP_CORREL
-        )
-
-# Initialize the recognizer
-recognizer = SimpleFaceRecognizer()
-
-def train_model():
-    """Train the face recognition model"""
+def capture_images(name, user_id, save_dir="images"):
+    """Capture multiple images of a face for registration"""
     try:
-        logger.info("Training face recognition model...")
-        # The model is automatically updated when new faces are added
-        return True
-    except Exception as e:
-        logger.error(f"Error training model: {str(e)}")
-        return False
-
-def capture_images(name, user_id):
-    """Capture face images for registration"""
-    try:
-        # Initialize camera
-        cap = cv2.VideoCapture(0)
-        if not cap.isOpened():
-            logger.error("Error: Could not open camera")
-            return False
-
-        count = 0
-        face_features = []
+        # Create directory for user images
+        user_dir = os.path.join(save_dir, str(user_id))
+        os.makedirs(user_dir, exist_ok=True)
         
-        while count < 5:  # Capture 5 images
+        # Initialize camera
+        cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)  # Try DirectShow backend on Windows
+        if not cap.isOpened():
+            cap = cv2.VideoCapture(0)  # Fallback to default
+        
+        if not cap.isOpened():
+            logger.error("Could not open camera")
+            return False
+            
+        images_captured = 0
+        required_images = 5
+        
+        while images_captured < required_images:
             ret, frame = cap.read()
             if not ret:
-                logger.error("Error: Could not read frame")
+                logger.error("Failed to grab frame")
                 break
-
+                
+            # Convert to grayscale
             gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-            faces = face_cascade.detectMultiScale(gray, 1.3, 5)
-
+            
+            # Detect faces
+            faces = detector.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=5, minSize=(30, 30))
+            
             for (x, y, w, h) in faces:
-                face_img = gray[y:y+h, x:x+w]
-                features = recognizer._get_face_features(face_img)
-                face_features.append(features)
+                # Draw rectangle around face
+                cv2.rectangle(frame, (x, y), (x+w, y+h), (0, 255, 0), 2)
                 
-                # Save the face image
-                img_path = os.path.join(recognizer.faces_dir, f"{user_id}_{count}.jpg")
-                cv2.imwrite(img_path, face_img)
+                # Extract and save face
+                face = gray[y:y+h, x:x+w]
+                face_path = os.path.join(user_dir, f"{images_captured}.jpg")
+                cv2.imwrite(face_path, face)
                 
-                count += 1
-                break  # Only use the first face detected
-
+                images_captured += 1
+                logger.info(f"Captured image {images_captured}/{required_images}")
+                break
+            
+            # Display frame
+            cv2.imshow('Capture', frame)
+            if cv2.waitKey(1) & 0xFF == ord('q'):
+                break
+                
         cap.release()
-
-        if count > 0:
-            # Save face features
-            recognizer.face_data[str(user_id)] = {
-                'name': name,
-                'features': face_features,
-                'timestamp': datetime.now().isoformat()
-            }
-            recognizer._save_face_data()
+        cv2.destroyAllWindows()
+        
+        if images_captured == required_images:
+            # Extract and save features
+            features = extract_features(user_dir)
+            save_features(user_id, features)
             return True
             
         return False
+        
     except Exception as e:
         logger.error(f"Error capturing images: {str(e)}")
         return False
 
-def get_user_by_face():
-    """Recognize a face and return the user ID"""
+def extract_features(image_dir):
+    """Extract features from captured images"""
+    features = []
+    for img_name in os.listdir(image_dir):
+        if img_name.endswith('.jpg'):
+            img_path = os.path.join(image_dir, img_name)
+            img = cv2.imread(img_path, cv2.IMREAD_GRAYSCALE)
+            
+            # Calculate histogram as feature
+            hist = cv2.calcHist([img], [0], None, [256], [0, 256])
+            hist = cv2.normalize(hist, hist).flatten()
+            features.append(hist.tolist())
+    
+    return np.mean(features, axis=0).tolist()
+
+def save_features(user_id, features):
+    """Save user features to JSON file"""
+    features_file = os.path.join('model', 'features.json')
+    
     try:
-        cap = cv2.VideoCapture(0)
+        if os.path.exists(features_file):
+            with open(features_file, 'r') as f:
+                all_features = json.load(f)
+        else:
+            all_features = {}
+        
+        all_features[str(user_id)] = features
+        
+        with open(features_file, 'w') as f:
+            json.dump(all_features, f)
+            
+    except Exception as e:
+        logger.error(f"Error saving features: {str(e)}")
+
+def get_user_by_face():
+    """Recognize user from webcam"""
+    try:
+        features_file = os.path.join('model', 'features.json')
+        if not os.path.exists(features_file):
+            logger.error("No registered users found")
+            return None
+            
+        with open(features_file, 'r') as f:
+            all_features = json.load(f)
+            
+        if not all_features:
+            logger.error("No registered users found")
+            return None
+            
+        # Initialize camera
+        cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)  # Try DirectShow backend on Windows
         if not cap.isOpened():
-            logger.error("Error: Could not open camera")
+            cap = cv2.VideoCapture(0)  # Fallback to default
+            
+        if not cap.isOpened():
+            logger.error("Could not open camera")
             return None
-
-        ret, frame = cap.read()
-        if not ret:
-            logger.error("Error: Could not read frame")
-            return None
-
-        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        faces = face_cascade.detectMultiScale(gray, 1.3, 5)
-
-        for (x, y, w, h) in faces:
-            face_img = gray[y:y+h, x:x+w]
-            features = recognizer._get_face_features(face_img)
             
-            best_match = None
-            best_score = -1
+        while True:
+            ret, frame = cap.read()
+            if not ret:
+                break
+                
+            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+            faces = detector.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=5, minSize=(30, 30))
             
-            for user_id, data in recognizer.face_data.items():
-                for stored_features in data['features']:
-                    score = recognizer._compare_features(features, stored_features)
-                    if score > best_score:
-                        best_score = score
-                        best_match = user_id
-
-            cap.release()
+            for (x, y, w, h) in faces:
+                face = gray[y:y+h, x:x+w]
+                
+                # Calculate histogram
+                hist = cv2.calcHist([face], [0], None, [256], [0, 256])
+                hist = cv2.normalize(hist, hist).flatten()
+                
+                # Compare with stored features
+                min_dist = float('inf')
+                matched_id = None
+                
+                for user_id, features in all_features.items():
+                    dist = np.linalg.norm(hist - np.array(features))
+                    if dist < min_dist and dist < 0.3:  # Threshold for matching
+                        min_dist = dist
+                        matched_id = user_id
+                
+                if matched_id:
+                    cap.release()
+                    cv2.destroyAllWindows()
+                    return matched_id
+                    
+                cv2.rectangle(frame, (x, y), (x+w, y+h), (0, 255, 0), 2)
             
-            # Threshold for face recognition confidence
-            if best_score > 0.5:
-                return best_match
+            cv2.imshow('Recognition', frame)
+            if cv2.waitKey(1) & 0xFF == ord('q'):
+                break
                 
         cap.release()
+        cv2.destroyAllWindows()
         return None
+        
     except Exception as e:
-        logger.error(f"Error recognizing face: {str(e)}")
+        logger.error(f"Error in face recognition: {str(e)}")
         return None
