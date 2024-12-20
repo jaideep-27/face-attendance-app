@@ -5,25 +5,29 @@ import urllib.request
 
 # Download and initialize face detector
 CASCADE_URL = 'https://raw.githubusercontent.com/opencv/opencv/master/data/haarcascades/haarcascade_frontalface_default.xml'
-CASCADE_PATH = os.path.join('model', 'haarcascade_frontalface_default.xml')
+CASCADE_PATH = os.path.join(os.path.dirname(__file__), 'model', 'haarcascade_frontalface_default.xml')
+
+# Create model directory if it doesn't exist
+os.makedirs(os.path.dirname(CASCADE_PATH), exist_ok=True)
 
 # Download cascade classifier if not exists
 if not os.path.exists(CASCADE_PATH):
     print(f"Downloading cascade classifier to {CASCADE_PATH}")
-    os.makedirs('model', exist_ok=True)
     urllib.request.urlretrieve(CASCADE_URL, CASCADE_PATH)
 
-detector = cv2.CascadeClassifier(CASCADE_PATH)
-if detector.empty():
-    raise RuntimeError(f"Failed to load cascade classifier from {CASCADE_PATH}")
+# Initialize face detector
+detector = cv2.CascadeClassifier()
+if not detector.load(CASCADE_PATH):
+    raise RuntimeError(f"Error: Failed to load cascade classifier from {CASCADE_PATH}")
 
 # Initialize LBPH Face Recognizer
 recognizer = cv2.face.LBPHFaceRecognizer_create()
-RECOGNIZER_PATH = os.path.join('model', 'lbph_recognizer.yml')
+RECOGNIZER_PATH = os.path.join(os.path.dirname(__file__), 'model', 'lbph_recognizer.yml')
 
 def capture_images(name, student_id, save_dir="images"):
     """Capture face images for registration"""
     try:
+        save_dir = os.path.join(os.path.dirname(__file__), save_dir)
         os.makedirs(save_dir, exist_ok=True)
         student_dir = os.path.join(save_dir, f"{student_id}_{name}")
         os.makedirs(student_dir, exist_ok=True)
@@ -32,7 +36,7 @@ def capture_images(name, student_id, save_dir="images"):
         cam = None
         for idx in range(2):
             try:
-                cam = cv2.VideoCapture(idx, cv2.CAP_DSHOW)
+                cam = cv2.VideoCapture(idx)
                 if cam is not None and cam.isOpened():
                     ret, test_frame = cam.read()
                     if ret and test_frame is not None:
@@ -99,6 +103,9 @@ def capture_images(name, student_id, save_dir="images"):
 def train_model(image_dir="images", model_dir="model"):
     """Train the face recognition model"""
     try:
+        image_dir = os.path.join(os.path.dirname(__file__), image_dir)
+        model_dir = os.path.join(os.path.dirname(__file__), model_dir)
+        
         if not os.path.exists(image_dir):
             raise RuntimeError(f"Image directory {image_dir} does not exist")
             
@@ -118,8 +125,11 @@ def train_model(image_dir="images", model_dir="model"):
                     if img_name.endswith('.jpg'):
                         img_path = os.path.join(person_path, img_name)
                         face_img = cv2.imread(img_path, cv2.IMREAD_GRAYSCALE)
-                        faces.append(face_img)
-                        labels.append(current_label)
+                        if face_img is not None:
+                            faces.append(face_img)
+                            labels.append(current_label)
+                        else:
+                            print(f"Warning: Could not read image {img_path}")
                 
                 current_label += 1
         
@@ -153,7 +163,7 @@ def get_user_by_face(frame=None):
             raise RuntimeError("Face recognition model not found. Please train the model first.")
             
         # Load label mapping
-        label_map_path = os.path.join('model', 'label_map.txt')
+        label_map_path = os.path.join(os.path.dirname(__file__), 'model', 'label_map.txt')
         label_map = {}
         with open(label_map_path, 'r') as f:
             for line in f:
@@ -168,7 +178,7 @@ def get_user_by_face(frame=None):
             cam = None
             for idx in range(2):
                 try:
-                    cam = cv2.VideoCapture(idx, cv2.CAP_DSHOW)
+                    cam = cv2.VideoCapture(idx)
                     if cam is not None and cam.isOpened():
                         ret, frame = cam.read()
                         if ret and frame is not None:
