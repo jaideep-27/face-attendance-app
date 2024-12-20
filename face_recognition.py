@@ -1,6 +1,5 @@
 import cv2
 import numpy as np
-from PIL import Image
 import os
 import urllib.request
 
@@ -18,45 +17,47 @@ detector = cv2.CascadeClassifier(CASCADE_PATH)
 if detector.empty():
     raise RuntimeError(f"Failed to load cascade classifier from {CASCADE_PATH}")
 
+# Initialize LBPH Face Recognizer
+recognizer = cv2.face.LBPHFaceRecognizer_create()
+RECOGNIZER_PATH = os.path.join('model', 'lbph_recognizer.yml')
+
 def capture_images(name, student_id, save_dir="images"):
     """Capture face images for registration"""
-    cam = None
     try:
         os.makedirs(save_dir, exist_ok=True)
+        student_dir = os.path.join(save_dir, f"{student_id}_{name}")
+        os.makedirs(student_dir, exist_ok=True)
         
-        # Try different camera indices with detailed error reporting
-        camera_found = False
-        for idx in range(3):  # Try indices 0, 1, and 2
+        # Try different camera indices
+        cam = None
+        for idx in range(2):
             try:
-                cam = cv2.VideoCapture(idx, cv2.CAP_DSHOW)  # Use DirectShow on Windows
+                cam = cv2.VideoCapture(idx, cv2.CAP_DSHOW)
                 if cam is not None and cam.isOpened():
-                    # Try to read a test frame
                     ret, test_frame = cam.read()
                     if ret and test_frame is not None:
                         print(f"Successfully connected to camera {idx}")
-                        camera_found = True
                         break
                     else:
                         print(f"Camera {idx} opened but couldn't read frame")
                         cam.release()
-                else:
-                    print(f"Failed to open camera {idx}")
+                        cam = None
             except Exception as e:
                 print(f"Error trying camera {idx}: {str(e)}")
                 if cam is not None:
                     cam.release()
                     cam = None
         
-        if not camera_found:
+        if cam is None:
             raise RuntimeError("No working camera found. Please check your camera connection and permissions.")
             
         count = 0
-        max_attempts = 50  # Maximum frames to try
+        max_attempts = 50
         attempts = 0
         
         print("Starting image capture. Please look at the camera...")
         
-        while attempts < max_attempts:
+        while attempts < max_attempts and count < 5:
             ret, frame = cam.read()
             if not ret:
                 print(f"Failed to read frame (attempt {attempts + 1}/{max_attempts})")
@@ -72,23 +73,21 @@ def capture_images(name, student_id, save_dir="images"):
                 continue
             
             for (x, y, w, h) in faces:
-                count += 1
-                face_path = os.path.join(save_dir, f"{name}_{student_id}_{count}.jpg")
                 face_img = gray[y:y+h, x:x+w]
-                cv2.imwrite(face_path, face_img)
+                face_img = cv2.resize(face_img, (200, 200))
+                count += 1
+                cv2.imwrite(os.path.join(student_dir, f"{count}.jpg"), face_img)
                 print(f"Captured image {count}/5")
-                
-            if count >= 5:  # Capture 5 face images
-                print("Successfully captured all required images!")
                 break
                 
             attempts += 1
-            
+        
         if count == 0:
             print("Failed to capture any images. Please try again in better lighting conditions.")
             return False
             
-        return count > 0
+        print("Successfully captured all required images!")
+        return True
         
     except Exception as e:
         print(f"Error during image capture: {str(e)}")
@@ -97,128 +96,120 @@ def capture_images(name, student_id, save_dir="images"):
         if cam is not None:
             cam.release()
 
-def train_model(image_dir, model_dir):
+def train_model(image_dir="images", model_dir="model"):
+    """Train the face recognition model"""
     try:
+        if not os.path.exists(image_dir):
+            raise RuntimeError(f"Image directory {image_dir} does not exist")
+            
+        faces = []
+        labels = []
+        label_map = {}
+        current_label = 0
+        
+        # Load training images
+        for person_dir in os.listdir(image_dir):
+            if os.path.isdir(os.path.join(image_dir, person_dir)):
+                student_id = person_dir.split('_')[0]
+                label_map[current_label] = student_id
+                
+                person_path = os.path.join(image_dir, person_dir)
+                for img_name in os.listdir(person_path):
+                    if img_name.endswith('.jpg'):
+                        img_path = os.path.join(person_path, img_name)
+                        face_img = cv2.imread(img_path, cv2.IMREAD_GRAYSCALE)
+                        faces.append(face_img)
+                        labels.append(current_label)
+                
+                current_label += 1
+        
+        if not faces:
+            raise RuntimeError("No training images found")
+            
+        # Train the recognizer
+        recognizer.train(faces, np.array(labels))
+        
+        # Save the model and label mapping
         os.makedirs(model_dir, exist_ok=True)
+        recognizer.save(RECOGNIZER_PATH)
         
-        recognizer = cv2.face.LBPHFaceRecognizer_create()
-        face_samples = []
-        ids = []
-        
-        for image_path in os.listdir(image_dir):
-            if not image_path.endswith(('.jpg', '.jpeg', '.png')):
-                continue
+        # Save label mapping
+        label_map_path = os.path.join(model_dir, 'label_map.txt')
+        with open(label_map_path, 'w') as f:
+            for label, student_id in label_map.items():
+                f.write(f"{label},{student_id}\n")
                 
-            img = Image.open(os.path.join(image_dir, image_path)).convert('L')
-            img_np = np.array(img, 'uint8')
-            student_id = int(image_path.split('_')[1])
-            faces = detector.detectMultiScale(img_np)
-            
-            for (x, y, w, h) in faces:
-                face_samples.append(img_np[y:y+h, x:x+w])
-                ids.append(student_id)
-                
-        if not face_samples:
-            return False
-            
-        recognizer.train(face_samples, np.array(ids))
-        recognizer.write(os.path.join(model_dir, "trained_model.yml"))
-        
+        print("Model training completed successfully!")
         return True
         
     except Exception as e:
         print(f"Error training model: {str(e)}")
         return False
 
-def recognize_face(model_dir):
-    recognizer = cv2.face.LBPHFaceRecognizer_create()
-    model_path = os.path.join(model_dir, "trained_model.yml")
-    
-    if not os.path.exists(model_path):
-        return None
-        
-    recognizer.read(model_path)
-    cam = cv2.VideoCapture(0)
-    
-    # Wait for camera to initialize
-    for _ in range(5):
-        ret, frame = cam.read()
-        if not ret:
-            return None
-            
-    # Capture and process frame
-    ret, frame = cam.read()
-    if not ret:
-        return None
-        
-    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-    faces = detector.detectMultiScale(gray, scaleFactor=1.3, minNeighbors=5)
-    
-    for (x, y, w, h) in faces:
-        face = gray[y:y+h, x:x+w]
-        student_id, confidence = recognizer.predict(face)
-        
-        if confidence < 70:
-            cam.release()
-            cv2.destroyAllWindows()
-            return student_id
-            
-    cam.release()
-    cv2.destroyAllWindows()
-    return None
-
-def get_user_by_face(model_dir="model"):
-    """Recognize a face and return the student ID if found"""
+def get_user_by_face(frame=None):
+    """Recognize a face and return the student ID"""
     try:
-        recognizer = cv2.face.LBPHFaceRecognizer_create()
-        model_path = os.path.join(model_dir, "trained_model.yml")
-        
-        if not os.path.exists(model_path):
-            print("No trained model found")
-            return None
+        if not os.path.exists(RECOGNIZER_PATH):
+            raise RuntimeError("Face recognition model not found. Please train the model first.")
             
-        recognizer.read(model_path)
-        cam = cv2.VideoCapture(0)
+        # Load label mapping
+        label_map_path = os.path.join('model', 'label_map.txt')
+        label_map = {}
+        with open(label_map_path, 'r') as f:
+            for line in f:
+                label, student_id = line.strip().split(',')
+                label_map[int(label)] = student_id
         
-        if not cam.isOpened():
-            print("Error: Could not open camera")
-            return None
+        # Load the recognizer
+        recognizer.read(RECOGNIZER_PATH)
         
-        # Wait for camera to initialize
-        for _ in range(5):
-            ret, frame = cam.read()
-            if not ret:
-                print("Error: Could not read frame during initialization")
-                return None
-                
-        # Capture and process frame
-        ret, frame = cam.read()
-        if not ret:
-            print("Error: Could not read frame")
-            return None
+        if frame is None:
+            # Try to capture a frame from the camera
+            cam = None
+            for idx in range(2):
+                try:
+                    cam = cv2.VideoCapture(idx, cv2.CAP_DSHOW)
+                    if cam is not None and cam.isOpened():
+                        ret, frame = cam.read()
+                        if ret and frame is not None:
+                            break
+                except:
+                    if cam is not None:
+                        cam.release()
+                        cam = None
             
+            if frame is None:
+                raise RuntimeError("Could not capture frame from camera")
+        
+        # Convert frame to grayscale
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        
+        # Detect faces
         faces = detector.detectMultiScale(gray, scaleFactor=1.3, minNeighbors=5)
         
-        student_id = None
-        min_confidence = float('inf')
-        
-        for (x, y, w, h) in faces:
-            face = gray[y:y+h, x:x+w]
-            id_, confidence = recognizer.predict(face)
+        if len(faces) == 0:
+            return None
             
-            if confidence < 70 and confidence < min_confidence:
-                student_id = id_
-                min_confidence = confidence
+        # For each detected face
+        for (x, y, w, h) in faces:
+            face_img = gray[y:y+h, x:x+w]
+            face_img = cv2.resize(face_img, (200, 200))
+            
+            # Predict the label
+            label, confidence = recognizer.predict(face_img)
+            
+            # If confidence is too low, return None
+            if confidence > 100:  # Adjust this threshold as needed
+                continue
+                
+            # Return the student ID
+            return label_map.get(label)
         
-        return student_id
+        return None
         
     except Exception as e:
-        print(f"Error in face recognition: {str(e)}")
+        print(f"Error during face recognition: {str(e)}")
         return None
     finally:
-        try:
+        if 'cam' in locals() and cam is not None:
             cam.release()
-            cv2.destroyAllWindows()
-        except:
-            pass
