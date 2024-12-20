@@ -20,48 +20,78 @@ if detector.empty():
 
 def capture_images(name, student_id, save_dir="images"):
     """Capture face images for registration"""
+    cam = None
     try:
         os.makedirs(save_dir, exist_ok=True)
         
-        # Try different camera indices
-        cam = None
-        for idx in range(2):
-            cam = cv2.VideoCapture(idx)
-            if cam.isOpened():
-                break
-                
-        if cam is None or not cam.isOpened():
-            print("Error: Could not open camera")
-            return False
+        # Try different camera indices with detailed error reporting
+        camera_found = False
+        for idx in range(3):  # Try indices 0, 1, and 2
+            try:
+                cam = cv2.VideoCapture(idx, cv2.CAP_DSHOW)  # Use DirectShow on Windows
+                if cam is not None and cam.isOpened():
+                    # Try to read a test frame
+                    ret, test_frame = cam.read()
+                    if ret and test_frame is not None:
+                        print(f"Successfully connected to camera {idx}")
+                        camera_found = True
+                        break
+                    else:
+                        print(f"Camera {idx} opened but couldn't read frame")
+                        cam.release()
+                else:
+                    print(f"Failed to open camera {idx}")
+            except Exception as e:
+                print(f"Error trying camera {idx}: {str(e)}")
+                if cam is not None:
+                    cam.release()
+                    cam = None
+        
+        if not camera_found:
+            raise RuntimeError("No working camera found. Please check your camera connection and permissions.")
             
         count = 0
         max_attempts = 50  # Maximum frames to try
         attempts = 0
         
+        print("Starting image capture. Please look at the camera...")
+        
         while attempts < max_attempts:
             ret, frame = cam.read()
             if not ret:
-                print("Error: Could not read frame")
+                print(f"Failed to read frame (attempt {attempts + 1}/{max_attempts})")
                 attempts += 1
                 continue
                 
             gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
             faces = detector.detectMultiScale(gray, scaleFactor=1.3, minNeighbors=5)
             
+            if len(faces) == 0:
+                print("No face detected. Please make sure your face is visible to the camera.")
+                attempts += 1
+                continue
+            
             for (x, y, w, h) in faces:
                 count += 1
                 face_path = os.path.join(save_dir, f"{name}_{student_id}_{count}.jpg")
-                cv2.imwrite(face_path, gray[y:y+h, x:x+w])
+                face_img = gray[y:y+h, x:x+w]
+                cv2.imwrite(face_path, face_img)
+                print(f"Captured image {count}/5")
                 
             if count >= 5:  # Capture 5 face images
+                print("Successfully captured all required images!")
                 break
                 
             attempts += 1
             
+        if count == 0:
+            print("Failed to capture any images. Please try again in better lighting conditions.")
+            return False
+            
         return count > 0
         
     except Exception as e:
-        print(f"Error capturing images: {str(e)}")
+        print(f"Error during image capture: {str(e)}")
         return False
     finally:
         if cam is not None:
