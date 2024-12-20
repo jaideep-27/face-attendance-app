@@ -240,15 +240,32 @@ if choice == "Register":
     if st.button("Register"):
         if name and roll_number:
             try:
-                if capture_images(name, roll_number):
-                    if add_user(roll_number, name):
-                        st.success(f"✨ Registration successful! Welcome {name}!")
-                        st.session_state.user_id = roll_number
+                logger.info(f"Starting registration for {name} ({roll_number})")
+                
+                # First try to add user to database
+                if add_user(roll_number, name):
+                    logger.info("User added to database successfully")
+                    
+                    # Then try to capture and process face
+                    if capture_images(name, roll_number):
+                        logger.info("Face registration successful")
+                        st.success(f"✨ Registration successful! Welcome {name}! You can now proceed to login.")
+                        st.session_state.current_page = "Login"
+                        import time
+                        time.sleep(2)  # Give user time to read the message
                         st.rerun()
                     else:
-                        st.error("Failed to add user to database")
+                        logger.error("Face registration failed")
+                        # If face registration fails, remove user from database
+                        # TODO: Add function to remove user
+                        st.error("Face registration failed. Please try again with a clear photo.")
+                else:
+                    logger.error("Failed to add user to database")
+                    st.error("This roll number is already registered. Please use a different one.")
+                    
             except Exception as e:
-                st.error(f"Registration failed: {str(e)}")
+                logger.error(f"Registration error: {str(e)}", exc_info=True)
+                st.error(f"An error occurred during registration: {str(e)}")
         else:
             st.warning("Please fill in all fields")
 
