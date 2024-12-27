@@ -243,7 +243,13 @@ if choice == "Register":
     
     if name and roll_number:
         try:
-            # First try to add user to database
+            # First check if user exists
+            existing_user = get_user_by_id(roll_number)
+            if existing_user:
+                st.error("This roll number is already registered. Please use a different one.")
+                st.stop()
+            
+            # Try to add user to database
             logger.info(f"Starting registration for {name} ({roll_number})")
             if add_user(roll_number, name):
                 logger.info("User added to database successfully")
@@ -267,7 +273,7 @@ if choice == "Register":
                     conn.close()
             else:
                 logger.error("Failed to add user to database")
-                st.error("This roll number is already registered. Please use a different one.")
+                st.error("Failed to register user. Please try again.")
                 
         except Exception as e:
             logger.error(f"Registration error: {str(e)}")
@@ -278,40 +284,30 @@ if choice == "Register":
 elif choice == "Login":
     st.markdown("<h2>🔐 User Login</h2>", unsafe_allow_html=True)
     
-    if st.session_state.user_id:
-        st.session_state.current_page = "Mark Attendance"
-        st.rerun()
-    else:
-        if 'temp_user_id' not in st.session_state:
-            st.session_state.temp_user_id = None
-
-        if st.session_state.temp_user_id is None:
-            st.info("🎥 Click the button below to start face recognition")
-            scan_button = st.button("🔍 Scan Your Face")
-        else:
-            st.info("✅ Face scanned successfully! Click proceed to continue")
-            scan_button = st.button("🔄 Scan Again")
-
-        if scan_button:
-            with st.spinner("Scanning..."):
-                user_id = get_user_by_face()
-                if user_id:
-                    st.session_state.temp_user_id = user_id
-                    user_details = get_user_by_id(user_id)
-                    if user_details:
-                        name, roll_number = user_details
-                        st.success(f"✨ Welcome back, {name}!")
-                        st.rerun()
-                else:
-                    st.error("Face not recognized")
-                    st.session_state.temp_user_id = None
-
-        if st.session_state.temp_user_id:
-            if st.button("➡️ Proceed to Mark Attendance"):
-                st.session_state.user_id = st.session_state.temp_user_id
-                st.session_state.temp_user_id = None
+    # Check if there are any registered users
+    users = list_users()
+    if not users:
+        st.warning("No registered users found. Please register first.")
+        if st.button("Go to Registration"):
+            st.session_state.current_page = "Register"
+            st.rerun()
+        st.stop()
+    
+    st.markdown("<h3>🎥 Click the button below to start face recognition</h3>", unsafe_allow_html=True)
+    
+    if st.button("Start Face Recognition"):
+        try:
+            recognized_user = get_user_by_face()
+            if recognized_user:
+                st.success(f"✨ Welcome back {recognized_user[1]}!")
+                st.session_state.user_id = recognized_user[0]
                 st.session_state.current_page = "Mark Attendance"
                 st.rerun()
+            else:
+                st.error("Face not recognized. Please try again or register if you haven't already.")
+        except Exception as e:
+            logger.error(f"Login error: {str(e)}")
+            st.error(f"An error occurred during login: {str(e)}")
 
 elif choice == "Logout":
     # Immediately clear everything and redirect
