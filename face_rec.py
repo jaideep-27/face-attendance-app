@@ -53,13 +53,17 @@ def capture_images(name, user_id, save_dir="images"):
     try:
         logger.info(f"Starting image capture for user: {name} (ID: {user_id})")
         
-        # Create directory for user images if it doesn't exist
-        os.makedirs(save_dir, exist_ok=True)
+        # Clean up any existing files for this user
         user_dir = os.path.join(save_dir, str(user_id))
+        if os.path.exists(user_dir):
+            import shutil
+            shutil.rmtree(user_dir)
+        
+        # Create directory for user images
         os.makedirs(user_dir, exist_ok=True)
         logger.info(f"Created user directory: {user_dir}")
         
-        # For cloud deployment, use Streamlit's camera input with a proper label
+        # For cloud deployment, use Streamlit's camera input
         img_file = st.camera_input(
             label=f"Take a picture for {name}",
             key=f"camera_{user_id}",
@@ -67,7 +71,6 @@ def capture_images(name, user_id, save_dir="images"):
         )
         
         if img_file is None:
-            logger.info("No image captured yet")
             return None  # Return None to indicate waiting for image
             
         logger.info("Image captured from camera")
@@ -106,10 +109,22 @@ def capture_images(name, user_id, save_dir="images"):
         cv2.imwrite(face_path, face)
         logger.info(f"Saved face image to: {face_path}")
         
+        # Clean up any existing features for this user
+        features_file = os.path.join('model', 'features.json')
+        if os.path.exists(features_file):
+            try:
+                with open(features_file, 'r') as f:
+                    features = json.load(f)
+                if str(user_id) in features:
+                    del features[str(user_id)]
+                with open(features_file, 'w') as f:
+                    json.dump(features, f)
+            except:
+                pass
+        
         # Train model with the captured image
         if train_model(user_id, user_dir):
             logger.info("Face registration and training successful")
-            st.success("✨ Face registered successfully!")
             return True
         else:
             logger.error("Model training failed")
@@ -117,7 +132,7 @@ def capture_images(name, user_id, save_dir="images"):
             return False
             
     except Exception as e:
-        logger.error(f"Error capturing images: {str(e)}", exc_info=True)
+        logger.error(f"Error capturing images: {str(e)}")
         st.error(f"An error occurred during image capture: {str(e)}")
         return False
 

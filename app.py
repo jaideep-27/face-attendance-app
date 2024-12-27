@@ -237,73 +237,43 @@ else:
 if choice == "Register":
     st.markdown("<h2>📝 New User Registration</h2>", unsafe_allow_html=True)
     
-    # For debugging
-    if os.environ.get('DEBUG'):
-        st.write("Current users in database:")
-        users = list_users()
-        for user_id, name in users:
-            st.write(f"- {name} (ID: {user_id})")
-    
     # Get user inputs
     name = st.text_input("Full Name")
     roll_number = st.text_input("Roll Number")
     
-    if st.button("Register"):
-        if name and roll_number:
-            try:
-                # Clean up any existing files for this user
-                user_image_dir = os.path.join('images', str(roll_number))
-                if os.path.exists(user_image_dir):
-                    import shutil
-                    shutil.rmtree(user_image_dir)
+    if name and roll_number:
+        try:
+            # First try to add user to database
+            logger.info(f"Starting registration for {name} ({roll_number})")
+            if add_user(roll_number, name):
+                logger.info("User added to database successfully")
                 
-                features_file = os.path.join('model', 'features.json')
-                if os.path.exists(features_file):
-                    try:
-                        with open(features_file, 'r') as f:
-                            features = json.load(f)
-                        if str(roll_number) in features:
-                            del features[str(roll_number)]
-                        with open(features_file, 'w') as f:
-                            json.dump(features, f)
-                    except:
-                        pass
+                # Then try to capture and process face
+                result = capture_images(name, roll_number)
                 
-                logger.info(f"Starting registration for {name} ({roll_number})")
+                if result is True:
+                    logger.info("Face registration successful")
+                    st.success(f"✨ Registration successful! Welcome {name}! You can now proceed to login.")
+                    time.sleep(1)
+                    st.session_state.current_page = "Login"
+                    st.rerun()
+                elif result is False:
+                    logger.error("Face registration failed")
+                    # Remove user from database if face registration fails
+                    conn = sqlite3.connect('data/attendance.db')
+                    cursor = conn.cursor()
+                    cursor.execute('DELETE FROM users WHERE id = ?', (roll_number,))
+                    conn.commit()
+                    conn.close()
+            else:
+                logger.error("Failed to add user to database")
+                st.error("This roll number is already registered. Please use a different one.")
                 
-                # First try to add user to database
-                if add_user(roll_number, name):
-                    logger.info("User added to database successfully")
-                    
-                    # Then try to capture and process face
-                    result = capture_images(name, roll_number)
-                    
-                    if result is None:
-                        # Still waiting for image capture
-                        pass
-                    elif result:
-                        logger.info("Face registration successful")
-                        st.success(f"✨ Registration successful! Welcome {name}! You can now proceed to login.")
-                        st.session_state.current_page = "Login"
-                        time.sleep(2)  # Give user time to read the message
-                        st.rerun()
-                    else:
-                        logger.error("Face registration failed")
-                        # Remove user from database if face registration fails
-                        conn = sqlite3.connect('data/attendance.db')
-                        cursor = conn.cursor()
-                        cursor.execute('DELETE FROM users WHERE id = ?', (roll_number,))
-                        conn.commit()
-                        conn.close()
-                else:
-                    logger.error("Failed to add user to database")
-                    st.error("This roll number is already registered. Please use a different one.")
-                    
-            except Exception as e:
-                logger.error(f"Registration error: {str(e)}", exc_info=True)
-                st.error(f"An error occurred during registration: {str(e)}")
-        else:
-            st.warning("Please fill in all fields")
+        except Exception as e:
+            logger.error(f"Registration error: {str(e)}")
+            st.error(f"An error occurred during registration: {str(e)}")
+    else:
+        st.info("Please enter your name and roll number to register.")
 
 elif choice == "Login":
     st.markdown("<h2>🔐 User Login</h2>", unsafe_allow_html=True)
