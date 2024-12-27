@@ -53,13 +53,18 @@ def capture_images(name, user_id, save_dir="images"):
     try:
         logger.info(f"Starting image capture for user: {name} (ID: {user_id})")
         
-        # Create directory for user images
+        # Create directory for user images if it doesn't exist
+        os.makedirs(save_dir, exist_ok=True)
         user_dir = os.path.join(save_dir, str(user_id))
         os.makedirs(user_dir, exist_ok=True)
         logger.info(f"Created user directory: {user_dir}")
         
-        # For cloud deployment, use Streamlit's camera input
-        img_file = st.camera_input("Take a picture")
+        # For cloud deployment, use Streamlit's camera input with a proper label
+        img_file = st.camera_input(
+            label=f"Take a picture for {name}",
+            key=f"camera_{user_id}",
+            help="Please look directly at the camera and ensure good lighting"
+        )
         
         if img_file is None:
             logger.info("No image captured yet")
@@ -152,23 +157,27 @@ def extract_features(image_dir):
 
 def save_features(user_id, features):
     """Save user features to JSON file"""
-    features_file = os.path.join('model', 'features.json')
-    logger.info(f"Saving features for user {user_id} to {features_file}")
-    
     try:
         # Create model directory if it doesn't exist
         os.makedirs('model', exist_ok=True)
+        features_file = os.path.join('model', 'features.json')
+        logger.info(f"Saving features for user {user_id} to {features_file}")
         
+        # Load existing features or create new dictionary
         if os.path.exists(features_file):
-            with open(features_file, 'r') as f:
-                all_features = json.load(f)
-                logger.info("Loaded existing features file")
+            try:
+                with open(features_file, 'r') as f:
+                    all_features = json.load(f)
+                    logger.info("Loaded existing features file")
+            except json.JSONDecodeError:
+                logger.warning("Corrupted features file, creating new one")
+                all_features = {}
         else:
             all_features = {}
             logger.info("Created new features dictionary")
         
+        # Save the features
         all_features[str(user_id)] = features
-        
         with open(features_file, 'w') as f:
             json.dump(all_features, f)
             logger.info("Successfully saved features to file")
@@ -184,22 +193,33 @@ def get_user_by_face():
     """Recognize user from webcam"""
     try:
         logger.info("Starting face recognition")
+        
+        # Check if features file exists and has data
         features_file = os.path.join('model', 'features.json')
         if not os.path.exists(features_file):
-            logger.error("No registered users found")
+            logger.error("No registered users found (features file missing)")
             st.error("No registered users found. Please register first.")
             return None
             
-        with open(features_file, 'r') as f:
-            all_features = json.load(f)
+        try:
+            with open(features_file, 'r') as f:
+                all_features = json.load(f)
+        except json.JSONDecodeError:
+            logger.error("Corrupted features file")
+            st.error("User data is corrupted. Please register again.")
+            return None
             
         if not all_features:
-            logger.error("No registered users found")
+            logger.error("No registered users found (empty features file)")
             st.error("No registered users found. Please register first.")
             return None
             
-        # For cloud deployment, use Streamlit's camera input
-        img_file = st.camera_input("Take a picture for recognition")
+        # For cloud deployment, use Streamlit's camera input with proper label
+        img_file = st.camera_input(
+            label="Take a picture for recognition",
+            key="recognition_camera",
+            help="Please look directly at the camera and ensure good lighting"
+        )
         
         if img_file is not None:
             logger.info("Image captured from camera for recognition")
@@ -228,7 +248,7 @@ def get_user_by_face():
                 
             if len(faces) > 1:
                 logger.error("Multiple faces detected")
-                st.error("Multiple faces detected. Please ensure only one person is the frame.")
+                st.error("Multiple faces detected. Please ensure only one person is in the frame.")
                 return None
                 
             # Extract face and calculate features
