@@ -70,9 +70,14 @@ def capture_images(name, user_id, save_dir="images"):
             help="Please look directly at the camera and ensure good lighting"
         )
         
-        if img_file is None:
-            return None  # Return None to indicate waiting for image
-            
+        while img_file is None:
+            logger.info("Waiting for user to take photo...")
+            img_file = st.camera_input(
+                label=f"Take a picture for {name}",
+                key=f"camera_{user_id}",
+                help="Please look directly at the camera and ensure good lighting"
+            )
+        
         logger.info("Image captured from camera")
         
         # Save the captured image
@@ -240,61 +245,63 @@ def get_user_by_face():
             help="Please look directly at the camera and ensure good lighting"
         )
         
-        if img_file is not None:
-            logger.info("Image captured from camera for recognition")
+        if img_file is None:
+            logger.info("Waiting for user to take photo...")
+            return None
             
-            # Process the captured image
-            img = Image.open(img_file)
-            img = np.array(img)
-            
-            # Convert to grayscale if image is RGB
-            if len(img.shape) == 3:
-                gray = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
-            else:
-                gray = img
-                
-            # Detect faces
-            faces = detector.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=5, minSize=(30, 30))
-            
-            if len(faces) == 0:
-                logger.error("No face detected in the image")
-                st.error("No face detected in the image. Please try again.")
-                return None
-                
-            if len(faces) > 1:
-                logger.error("Multiple faces detected")
-                st.error("Multiple faces detected. Please ensure only one person is in the frame.")
-                return None
-                
-            # Extract face and calculate features
-            x, y, w, h = faces[0]
-            face = gray[y:y+h, x:x+w]
-            
-            # Calculate histogram
-            hist = cv2.calcHist([face], [0], None, [256], [0, 256])
-            hist = cv2.normalize(hist, hist).flatten()
-            
-            # Compare with stored features
-            min_dist = float('inf')
-            matched_id = None
-            
-            for user_id, features in all_features.items():
-                dist = np.linalg.norm(hist - np.array(features))
-                if dist < min_dist and dist < 0.3:  # Threshold for matching
-                    min_dist = dist
-                    matched_id = user_id
-            
-            if matched_id:
-                logger.info(f"Face recognized as user {matched_id}")
-                st.success("✨ Face recognized successfully!")
-                return matched_id
-            else:
-                logger.error("Face not recognized")
-                st.error("Face not recognized. Please try again or register if you're a new user.")
-                return None
-                
-        return None
+        logger.info("Image captured from camera for recognition")
         
+        # Process the captured image
+        img = Image.open(img_file)
+        img = np.array(img)
+        
+        # Convert to grayscale if image is RGB
+        if len(img.shape) == 3:
+            gray = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
+        else:
+            gray = img
+            
+        # Detect faces
+        faces = detector.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=5, minSize=(30, 30))
+        
+        if len(faces) == 0:
+            logger.error("No face detected in the image")
+            st.error("No face detected in the image. Please try again.")
+            return None
+            
+        if len(faces) > 1:
+            logger.error("Multiple faces detected")
+            st.error("Multiple faces detected. Please ensure only one person is in the frame.")
+            return None
+            
+        # Extract face and calculate features
+        x, y, w, h = faces[0]
+        face = gray[y:y+h, x:x+w]
+        
+        # Calculate histogram
+        hist = cv2.calcHist([face], [0], None, [256], [0, 256])
+        hist = cv2.normalize(hist, hist).flatten()
+        
+        # Compare with stored features
+        min_dist = float('inf')
+        matched_id = None
+        
+        for user_id, features in all_features.items():
+            dist = np.linalg.norm(hist - np.array(features))
+            logger.info(f"Distance from user {user_id}: {dist}")
+            if dist < min_dist and dist < 0.5:  # Increased threshold
+                min_dist = dist
+                matched_id = user_id
+        
+        if matched_id:
+            logger.info(f"Face recognized as user {matched_id} with distance {min_dist}")
+            st.success("✨ Face recognized successfully!")
+            return matched_id
+        else:
+            logger.error(f"Face not recognized (min distance: {min_dist})")
+            st.error("Face not recognized. Please try again or register if you're a new user.")
+            return None
+            
     except Exception as e:
         logger.error(f"Error in face recognition: {str(e)}")
         st.error("An error occurred during face recognition. Please try again.")
