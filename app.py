@@ -200,30 +200,20 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
+# Initialize database at startup
+init_db()
+
 # Initialize session state variables
 if 'initialized' not in st.session_state:
     st.session_state.initialized = True
     st.session_state.user_id = None
     st.session_state.current_page = None
     st.session_state.face_scanned = False
-    st.session_state.db_initialized = False
+    st.session_state.db_initialized = True
 
 # Initialize session state
 if 'current_page' not in st.session_state:
     st.session_state.current_page = "Login"
-
-# Initialize database only once when app starts
-if not st.session_state.db_initialized:
-    try:
-        # Reset database if it's corrupted or if DEBUG is set
-        if os.environ.get('DEBUG') or not os.path.exists('data/attendance.db'):
-            reset_db()
-        else:
-            init_db()
-        st.session_state.db_initialized = True
-    except Exception as e:
-        st.error(f"Database initialization error: {str(e)}")
-        st.stop()
 
 # Title with icon
 st.markdown("<h1>🎯 Smart Attendance System</h1>", unsafe_allow_html=True)

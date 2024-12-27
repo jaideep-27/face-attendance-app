@@ -16,6 +16,17 @@ def init_db():
         # Create data directory if it doesn't exist
         os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
         
+        # Remove existing database if it's corrupted
+        if os.path.exists(DB_PATH):
+            try:
+                conn = sqlite3.connect(DB_PATH)
+                cursor = conn.cursor()
+                cursor.execute('SELECT * FROM users LIMIT 1')
+                conn.close()
+            except sqlite3.Error:
+                logger.warning("Database appears corrupted, resetting...")
+                os.remove(DB_PATH)
+
         conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
 
