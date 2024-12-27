@@ -109,27 +109,31 @@ def capture_images(name, user_id, save_dir="images"):
         cv2.imwrite(face_path, face)
         logger.info(f"Saved face image to: {face_path}")
         
-        # Clean up any existing features for this user
+        # Calculate and save features immediately
+        hist = cv2.calcHist([face], [0], None, [256], [0, 256])
+        hist = cv2.normalize(hist, hist).flatten().tolist()
+        
+        # Save features
+        os.makedirs('model', exist_ok=True)
         features_file = os.path.join('model', 'features.json')
-        if os.path.exists(features_file):
-            try:
+        
+        try:
+            if os.path.exists(features_file):
                 with open(features_file, 'r') as f:
                     features = json.load(f)
-                if str(user_id) in features:
-                    del features[str(user_id)]
-                with open(features_file, 'w') as f:
-                    json.dump(features, f)
-            except:
-                pass
+            else:
+                features = {}
+        except:
+            features = {}
+            
+        features[str(user_id)] = hist
         
-        # Train model with the captured image
-        if train_model(user_id, user_dir):
-            logger.info("Face registration and training successful")
-            return True
-        else:
-            logger.error("Model training failed")
-            st.error("Failed to process face image. Please try again.")
-            return False
+        with open(features_file, 'w') as f:
+            json.dump(features, f)
+            
+        logger.info("Face features saved successfully")
+        st.success("✨ Face registered successfully!")
+        return True
             
     except Exception as e:
         logger.error(f"Error capturing images: {str(e)}")
@@ -225,11 +229,11 @@ def get_user_by_face():
             return None
             
         if not all_features:
-            logger.error("No registered users found (empty features file)")
+            logger.error("No registered users found (empty features)")
             st.error("No registered users found. Please register first.")
             return None
             
-        # For cloud deployment, use Streamlit's camera input with proper label
+        # For cloud deployment, use Streamlit's camera input
         img_file = st.camera_input(
             label="Take a picture for recognition",
             key="recognition_camera",
@@ -242,19 +246,15 @@ def get_user_by_face():
             # Process the captured image
             img = Image.open(img_file)
             img = np.array(img)
-            logger.info(f"Image shape: {img.shape}")
             
             # Convert to grayscale if image is RGB
             if len(img.shape) == 3:
                 gray = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
-                logger.info("Converted RGB image to grayscale")
             else:
                 gray = img
-                logger.info("Image is already grayscale")
                 
             # Detect faces
             faces = detector.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=5, minSize=(30, 30))
-            logger.info(f"Detected {len(faces)} faces")
             
             if len(faces) == 0:
                 logger.error("No face detected in the image")
@@ -269,12 +269,10 @@ def get_user_by_face():
             # Extract face and calculate features
             x, y, w, h = faces[0]
             face = gray[y:y+h, x:x+w]
-            logger.info("Extracted face from image")
             
             # Calculate histogram
             hist = cv2.calcHist([face], [0], None, [256], [0, 256])
             hist = cv2.normalize(hist, hist).flatten()
-            logger.info("Calculated histogram features")
             
             # Compare with stored features
             min_dist = float('inf')
@@ -288,17 +286,16 @@ def get_user_by_face():
             
             if matched_id:
                 logger.info(f"Face recognized as user {matched_id}")
-                st.success("Face recognized successfully!")
+                st.success("✨ Face recognized successfully!")
                 return matched_id
             else:
                 logger.error("Face not recognized")
                 st.error("Face not recognized. Please try again or register if you're a new user.")
                 return None
                 
-        logger.info("No image captured from camera for recognition")
         return None
         
     except Exception as e:
-        logger.error(f"Error in face recognition: {str(e)}", exc_info=True)
+        logger.error(f"Error in face recognition: {str(e)}")
         st.error("An error occurred during face recognition. Please try again.")
         return None
