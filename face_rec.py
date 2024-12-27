@@ -53,6 +53,10 @@ def capture_images(name, user_id, save_dir="images"):
     try:
         logger.info(f"Starting image capture for user: {name} (ID: {user_id})")
         
+        # Create directories if they don't exist
+        os.makedirs('model', exist_ok=True)
+        os.makedirs(save_dir, exist_ok=True)
+        
         # Clean up any existing files for this user
         user_dir = os.path.join(save_dir, str(user_id))
         if os.path.exists(user_dir):
@@ -70,32 +74,24 @@ def capture_images(name, user_id, save_dir="images"):
             help="Please look directly at the camera and ensure good lighting"
         )
         
-        while img_file is None:
+        if img_file is None:
             logger.info("Waiting for user to take photo...")
-            img_file = st.camera_input(
-                label=f"Take a picture for {name}",
-                key=f"camera_{user_id}",
-                help="Please look directly at the camera and ensure good lighting"
-            )
-        
+            return None
+            
         logger.info("Image captured from camera")
         
-        # Save the captured image
+        # Process the captured image
         img = Image.open(img_file)
         img = np.array(img)
-        logger.info(f"Image shape: {img.shape}")
         
         # Convert to grayscale if image is RGB
         if len(img.shape) == 3:
             gray = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
-            logger.info("Converted RGB image to grayscale")
         else:
             gray = img
-            logger.info("Image is already grayscale")
             
         # Detect faces
         faces = detector.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=5, minSize=(30, 30))
-        logger.info(f"Detected {len(faces)} faces")
         
         if len(faces) == 0:
             logger.error("No face detected in the image")
@@ -114,34 +110,36 @@ def capture_images(name, user_id, save_dir="images"):
         cv2.imwrite(face_path, face)
         logger.info(f"Saved face image to: {face_path}")
         
-        # Calculate and save features immediately
+        # Calculate histogram features
         hist = cv2.calcHist([face], [0], None, [256], [0, 256])
-        hist = cv2.normalize(hist, hist).flatten().tolist()
+        hist = cv2.normalize(hist, hist).flatten()
         
         # Save features
-        os.makedirs('model', exist_ok=True)
         features_file = os.path.join('model', 'features.json')
+        features = {}
         
-        try:
-            if os.path.exists(features_file):
+        # Load existing features if file exists
+        if os.path.exists(features_file):
+            try:
                 with open(features_file, 'r') as f:
                     features = json.load(f)
-            else:
+            except json.JSONDecodeError:
+                logger.warning("Corrupted features file, starting fresh")
                 features = {}
-        except:
-            features = {}
-            
-        features[str(user_id)] = hist
         
+        # Add new user features
+        features[str(user_id)] = hist.tolist()  # Convert numpy array to list for JSON serialization
+        
+        # Save updated features
         with open(features_file, 'w') as f:
             json.dump(features, f)
             
-        logger.info("Face features saved successfully")
+        logger.info(f"Saved features for user {user_id} to {features_file}")
         st.success("✨ Face registered successfully!")
         return True
             
     except Exception as e:
-        logger.error(f"Error capturing images: {str(e)}")
+        logger.error(f"Error capturing images: {str(e)}", exc_info=True)
         st.error(f"An error occurred during image capture: {str(e)}")
         return False
 
@@ -287,22 +285,27 @@ def get_user_by_face():
         matched_id = None
         
         for user_id, features in all_features.items():
-            dist = np.linalg.norm(hist - np.array(features))
+            features_array = np.array(features)
+            dist = np.linalg.norm(hist - features_array)
             logger.info(f"Distance from user {user_id}: {dist}")
-            if dist < min_dist and dist < 0.5:  # Increased threshold
+            if dist < min_dist:
                 min_dist = dist
                 matched_id = user_id
         
-        if matched_id:
+        # Use a more lenient threshold
+        if min_dist < 0.8:  # Increased from 0.5 to 0.8
             logger.info(f"Face recognized as user {matched_id} with distance {min_dist}")
-            st.success("✨ Face recognized successfully!")
-            return matched_id
+            from database import get_user_by_id
+            user = get_user_by_id(matched_id)
+            if user:
+                st.success(f"✨ Welcome back {user[1]}!")
+                return matched_id
         else:
             logger.error(f"Face not recognized (min distance: {min_dist})")
             st.error("Face not recognized. Please try again or register if you're a new user.")
             return None
             
     except Exception as e:
-        logger.error(f"Error in face recognition: {str(e)}")
+        logger.error(f"Error in face recognition: {str(e)}", exc_info=True)
         st.error("An error occurred during face recognition. Please try again.")
         return None
